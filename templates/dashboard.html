@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Polymarket Bots – Control Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+:root{
+  --bg:#0b0e17;--surface:#131826;--surface2:#1a2035;--border:#252d45;
+  --accent:#6c63ff;--accent2:#00d4aa;--warn:#f59e0b;--danger:#ef4444;
+  --success:#22c55e;--text:#e2e8f0;--muted:#64748b;--radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:14px;min-height:100vh;}
+
+/* ── Top nav ── */
+.nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+.nav-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;}
+.nav-logo .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);}
+.status-pill{display:flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--surface2);border:1px solid var(--border);}
+.status-pill .indicator{width:8px;height:8px;border-radius:50%;background:var(--muted);}
+.status-pill.online .indicator{background:var(--success);box-shadow:0 0 6px var(--success);}
+
+/* ── Layout ── */
+.layout{display:grid;grid-template-columns:260px 1fr;min-height:calc(100vh - 60px);}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:4px;}
+.main{padding:24px;overflow-y:auto;}
+
+/* ── Sidebar nav ── */
+.sidebar-section{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;padding:12px 8px 6px;}
+.sidebar-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;color:var(--muted);transition:.2s;font-weight:500;}
+.sidebar-item:hover{background:var(--surface2);color:var(--text);}
+.sidebar-item.active{background:linear-gradient(135deg,rgba(108,99,255,.2),rgba(0,212,170,.1));color:var(--text);border:1px solid rgba(108,99,255,.3);}
+.sidebar-item svg{flex-shrink:0;}
+
+/* ── Cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px;}
+.card-title{font-weight:700;font-size:15px;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.card-title .badge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;}
+.badge-purple{background:rgba(108,99,255,.2);color:#a78bfa;}
+.badge-teal{background:rgba(0,212,170,.2);color:#34d399;}
+.badge-warn{background:rgba(245,158,11,.2);color:#fbbf24;}
+
+/* ── Stat grid ── */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+.stat-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.stat-label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.stat-value{font-size:22px;font-weight:700;}
+.stat-value.green{color:var(--success);}
+.stat-value.red{color:var(--danger);}
+.stat-value.purple{color:#a78bfa;}
+.stat-value.teal{color:var(--accent2);}
+
+/* ── Forms ── */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;}
+.form-group{display:flex;flex-direction:column;gap:5px;}
+label{font-size:12px;color:var(--muted);font-weight:600;}
+input[type=text],input[type=number],input[type=password],select{
+  background:var(--bg);border:1px solid var(--border);border-radius:8px;
+  padding:8px 12px;color:var(--text);font-family:inherit;font-size:13px;
+  transition:.2s;width:100%;
+}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,99,255,.15);}
+.toggle-group{display:flex;align-items:center;gap:8px;margin-top:4px;}
+.toggle{position:relative;display:inline-block;width:40px;height:22px;}
+.toggle input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--border);border-radius:22px;transition:.3s;}
+.toggle-slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.3s;}
+.toggle input:checked+.toggle-slider{background:var(--accent);}
+.toggle input:checked+.toggle-slider:before{transform:translateX(18px);}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:.2s;}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#8b5cf6);color:#fff;}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px);}
+.btn-success{background:linear-gradient(135deg,var(--success),#16a34a);color:#fff;}
+.btn-success:hover{opacity:.9;transform:translateY(-1px);}
+.btn-danger{background:linear-gradient(135deg,var(--danger),#dc2626);color:#fff;}
+.btn-danger:hover{opacity:.9;}
+.btn-warn{background:linear-gradient(135deg,var(--warn),#d97706);color:#fff;}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent);}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;}
+
+/* ── Table ── */
+.tbl-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--border);}
+table{width:100%;border-collapse:collapse;}
+th{background:var(--surface2);padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;}
+td{padding:10px 14px;border-top:1px solid var(--border);font-size:13px;vertical-align:middle;}
+tr:hover td{background:rgba(255,255,255,.02);}
+.action-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;}
+.action-COPY_BUY,.action-ENTERED{background:rgba(34,197,94,.15);color:#4ade80;}
+.action-STOP_LOSS,.action-EXIT,.action-RISK_BLOCKED{background:rgba(239,68,68,.15);color:#f87171;}
+.action-SKIPPED,.action-ALREADY_OPEN{background:rgba(100,116,139,.15);color:#94a3b8;}
+
+/* ── Log feed ── */
+.log-box{background:var(--bg);border:1px solid var(--border);border-radius:10px;height:220px;overflow-y:auto;padding:12px;font-family:'Courier New',monospace;font-size:12px;display:flex;flex-direction:column-reverse;}
+.log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.log-line.ok{color:#4ade80;}
+.log-line.err{color:#f87171;}
+.log-line.warn{color:#fbbf24;}
+.log-line.info{color:#94a3b8;}
+
+/* ── Section tabs ── */
+.tab-bar{display:flex;gap:4px;border-bottom:2px solid var(--border);margin-bottom:20px;}
+.tab{padding:10px 20px;cursor:pointer;color:var(--muted);font-weight:600;border-bottom:2px solid transparent;margin-bottom:-2px;transition:.2s;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tab-content{display:none;}
+.tab-content.active{display:block;}
+
+/* ── Section pages ── */
+.page{display:none;}
+.page.active{display:block;}
+
+/* ── PnL colouring ── */
+.pos{color:var(--success);}
+.neg{color:var(--danger);}
+
+/* ── Bot status bar ── */
+.bot-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.bot-status{display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px;}
+.bot-status .dot{width:10px;height:10px;border-radius:50%;}
+.dot-on{background:var(--success);box-shadow:0 0 8px var(--success);animation:pulse 1.5s infinite;}
+.dot-off{background:var(--muted);}
+.dot-emergency{background:var(--danger);box-shadow:0 0 8px var(--danger);}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
+
+/* ── Responsive ── */
+@media(max-width:800px){
+  .layout{grid-template-columns:1fr;}
+  .sidebar{flex-direction:row;overflow-x:auto;padding:8px;}
+  .sidebar-section{display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav class="nav">
+  <div class="nav-logo">
+    <div class="dot"></div>
+    Polymarket Bot Suite
+  </div>
+  <div style="display:flex;gap:12px;align-items:center;">
+    <span id="nav-time" style="color:var(--muted);font-size:12px;"></span>
+    <div class="status-pill" id="conn-pill">
+      <div class="indicator"></div>
+      <span id="conn-label">Disconnected</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ── LAYOUT ── -->
+<div class="layout">
+
+  <!-- sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">Navigation</div>
+    <div class="sidebar-item active" onclick="showPage('overview')" id="nav-overview">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Overview
+    </div>
+    <div class="sidebar-item" onclick="showPage('credentials')" id="nav-credentials">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Credentials
+    </div>
+    <div class="sidebar-section">Bots</div>
+    <div class="sidebar-item" onclick="showPage('copy')" id="nav-copy">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/><rect x="8" y="8" width="12" height="12" rx="2"/></svg>
+      Copy Trading Bot
+    </div>
+    <div class="sidebar-item" onclick="showPage('hp')" id="nav-hp">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      High-Prob Bot
+    </div>
+    <div class="sidebar-section">System</div>
+    <div class="sidebar-item" onclick="showPage('audit')" id="nav-audit">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6M3 12a9 9 0 1 0 18 0A9 9 0 0 0 3 12z"/></svg>
+      Audit Log
+    </div>
+  </aside>
+
+  <!-- main -->
+  <main class="main">
+
+    <!-- ══ OVERVIEW ══ -->
+    <div class="page active" id="page-overview">
+      <h2 style="margin-bottom:20px;font-size:20px;">📊 Overview</h2>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Balance (USDC)</div><div class="stat-value teal" id="ov-balance">—</div></div>
+        <div class="stat-card"><div class="stat-label">Copy Bot</div><div class="stat-value" id="ov-copy-status">Stopped</div></div>
+        <div class="stat-card"><div class="stat-label">HP Bot</div><div class="stat-value" id="ov-hp-status">Stopped</div></div>
+        <div class="stat-card"><div class="stat-label">Open Positions</div><div class="stat-value purple" id="ov-positions">0</div></div>
+        <div class="stat-card"><div class="stat-label">Total PnL</div><div class="stat-value" id="ov-pnl">$0.00</div></div>
+        <div class="stat-card"><div class="stat-label">Daily Loss</div><div class="stat-value" id="ov-daily-loss">$0.00</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="card">
+          <div class="card-title">Copy Bot <span class="badge badge-purple">Bot 1</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Trades Copied</span><span id="ov-c-copied">0</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Trades Skipped</span><span id="ov-c-skipped">0</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Stop Losses</span><span id="ov-c-sl">0</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">PnL</span><span id="ov-c-pnl">$0.00</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">High-Prob Bot <span class="badge badge-teal">Bot 2</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Markets Scanned</span><span id="ov-h-scanned">0</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Entries</span><span id="ov-h-entries">0</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Take Profits</span><span id="ov-h-tp">0</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">PnL</span><span id="ov-h-pnl">$0.00</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ CREDENTIALS ══ -->
+    <div class="page" id="page-credentials">
+      <h2 style="margin-bottom:20px;font-size:20px;">🔐 API Credentials</h2>
+      <div class="card">
+        <div class="card-title">Polymarket Wallet & API Keys</div>
+        <div class="form-grid">
+          <div class="form-group" style="grid-column:1/-1;">
+            <label>Private Key (Polygon Wallet)</label>
+            <input type="password" id="f-pk" placeholder="0x..."/>
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="text" id="f-akey" placeholder="From Polymarket dashboard"/>
+          </div>
+          <div class="form-group">
+            <label>API Secret</label>
+            <input type="password" id="f-asec" placeholder="API Secret"/>
+          </div>
+          <div class="form-group">
+            <label>API Passphrase</label>
+            <input type="password" id="f-apass" placeholder="API Passphrase"/>
+          </div>
+          <div class="form-group">
+            <label>Funder Address (optional – Safe wallet)</label>
+            <input type="text" id="f-funder" placeholder="0x..."/>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="saveCredentials()">🔗 Connect</button>
+          <button class="btn btn-outline" onclick="pingServer()">📡 Ping Polymarket</button>
+          <button class="btn btn-outline" onclick="fetchBalance()">💰 Check Balance</button>
+        </div>
+        <p id="cred-msg" style="margin-top:10px;font-size:13px;color:var(--muted);"></p>
+      </div>
+    </div>
+
+    <!-- ══ COPY BOT ══ -->
+    <div class="page" id="page-copy">
+      <div class="bot-header">
+        <div class="bot-status">
+          <div class="dot dot-off" id="copy-dot"></div>
+          Copy Trading Bot
+        </div>
+        <div class="btn-row" style="margin:0;">
+          <button class="btn btn-success" id="copy-start-btn" onclick="copyStart()">▶ Start</button>
+          <button class="btn btn-outline" onclick="copyStop()">⏹ Stop</button>
+          <button class="btn btn-danger" onclick="copyEmergency()">🚨 Emergency Stop</button>
+        </div>
+      </div>
+
+      <!-- tabs -->
+      <div class="tab-bar">
+        <div class="tab active" onclick="switchTab('copy','config')">Configuration</div>
+        <div class="tab" onclick="switchTab('copy','positions')">Open Positions</div>
+        <div class="tab" onclick="switchTab('copy','log')">Trade Log</div>
+        <div class="tab" onclick="switchTab('copy','feed')">Live Feed</div>
+      </div>
+
+      <div class="tab-content active" id="copy-tab-config">
+        <div class="card">
+          <div class="card-title">Target Trader & Capital</div>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>🎯 Target Trader Address</label>
+              <input type="text" id="c-target" placeholder="0x..."/>
+            </div>
+            <div class="form-group"><label>Total Capital (USDC)</label><input type="number" id="c-capital" value="1000"/></div>
+            <div class="form-group"><label>Capital Allocation %</label><input type="number" id="c-alloc" value="50"/></div>
+            <div class="form-group"><label>Copy Ratio (0.10 = 10%)</label><input type="number" id="c-ratio" step="0.01" value="0.10"/></div>
+            <div class="form-group"><label>Max Trade Size (USDC)</label><input type="number" id="c-maxtr" value="200"/></div>
+            <div class="form-group"><label>Min Trade Size (USDC)</label><input type="number" id="c-mintr" value="5"/></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Risk Management</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Stop Loss %</label><input type="number" id="c-sl" value="20"/></div>
+            <div class="form-group"><label>Max Risk Per Trade %</label><input type="number" id="c-risk" value="5"/></div>
+            <div class="form-group"><label>Daily Loss Limit (USDC)</label><input type="number" id="c-dlimit" value="100"/></div>
+            <div class="form-group"><label>Weekly Loss Limit (USDC)</label><input type="number" id="c-wlimit" value="300"/></div>
+            <div class="form-group"><label>Max Open Positions</label><input type="number" id="c-maxpos" value="10"/></div>
+            <div class="form-group"><label>Poll Interval (seconds)</label><input type="number" id="c-poll" step="0.5" value="5"/></div>
+            <div class="form-group">
+              <label>Proportional Sizing</label>
+              <div class="toggle-group">
+                <label class="toggle"><input type="checkbox" id="c-prop" checked/><span class="toggle-slider"></span></label>
+                <span id="c-prop-label" style="color:var(--muted);">On</span>
+              </div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="saveCopyConfig()">💾 Save Configuration</button>
+          </div>
+          <p id="copy-cfg-msg" style="margin-top:8px;font-size:12px;color:var(--muted);"></p>
+        </div>
+      </div>
+
+      <div class="tab-content" id="copy-tab-positions">
+        <div class="card">
+          <div class="card-title">Open Positions <button class="btn btn-outline" style="padding:4px 10px;font-size:11px;margin-left:8px;" onclick="loadCopyPositions()">↻ Refresh</button></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Current</th><th>Size</th><th>PnL</th><th>Stop Loss</th><th>Opened</th></tr></thead>
+              <tbody id="copy-pos-body"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">No open positions</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="copy-tab-log">
+        <div class="card">
+          <div class="card-title">Trade History <button class="btn btn-outline" style="padding:4px 10px;font-size:11px;margin-left:8px;" onclick="loadCopyLog()">↻ Refresh</button></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Action</th><th>Market</th><th>Side</th><th>Our Size</th><th>Price</th><th>Reason</th></tr></thead>
+              <tbody id="copy-log-body"><tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px;">No trades yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="copy-tab-feed">
+        <div class="card">
+          <div class="card-title">Live Activity Feed</div>
+          <div class="log-box" id="copy-feed"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ HP BOT ══ -->
+    <div class="page" id="page-hp">
+      <div class="bot-header">
+        <div class="bot-status">
+          <div class="dot dot-off" id="hp-dot"></div>
+          High-Probability Entry Bot
+        </div>
+        <div class="btn-row" style="margin:0;">
+          <button class="btn btn-success" id="hp-start-btn" onclick="hpStart()">▶ Start</button>
+          <button class="btn btn-outline" onclick="hpStop()">⏹ Stop</button>
+          <button class="btn btn-danger" onclick="hpEmergency()">🚨 Emergency Stop</button>
+        </div>
+      </div>
+
+      <div class="tab-bar">
+        <div class="tab active" onclick="switchTab('hp','config')">Configuration</div>
+        <div class="tab" onclick="switchTab('hp','positions')">Open Positions</div>
+        <div class="tab" onclick="switchTab('hp','signals')">Signals Log</div>
+        <div class="tab" onclick="switchTab('hp','feed')">Live Feed</div>
+      </div>
+
+      <div class="tab-content active" id="hp-tab-config">
+        <div class="card">
+          <div class="card-title">Entry Strategy</div>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1;">
+              <label>📈 Entry Threshold (0.90 = 90 cents)</label>
+              <input type="number" id="h-threshold" step="0.01" min="0.5" max="0.99" value="0.90"/>
+            </div>
+            <div class="form-group"><label>Default Position Size (USDC)</label><input type="number" id="h-possize" value="50"/></div>
+            <div class="form-group"><label>Max Position Size (USDC)</label><input type="number" id="h-maxpos" value="200"/></div>
+            <div class="form-group"><label>Scan Interval (seconds)</label><input type="number" id="h-scan" step="1" value="10"/></div>
+            <div class="form-group">
+              <label>Strategy Mode</label>
+              <select id="h-mode">
+                <option value="true">Mean Reversion (bet opposite)</option>
+                <option value="false">Momentum (follow trend)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Risk Management</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Stop Loss %</label><input type="number" id="h-sl" value="15"/></div>
+            <div class="form-group"><label>Take Profit %</label><input type="number" id="h-tp" value="5"/></div>
+            <div class="form-group"><label>Daily Loss Limit (USDC)</label><input type="number" id="h-dlimit" value="150"/></div>
+            <div class="form-group"><label>Weekly Loss Limit (USDC)</label><input type="number" id="h-wlimit" value="400"/></div>
+            <div class="form-group"><label>Max Open Positions</label><input type="number" id="h-maxopen" value="5"/></div>
+            <div class="form-group"><label>Min Liquidity (USDC)</label><input type="number" id="h-minliq" value="1000"/></div>
+            <div class="form-group"><label>Min 24h Volume (USDC)</label><input type="number" id="h-minvol" value="500"/></div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="saveHpConfig()">💾 Save Configuration</button>
+          </div>
+          <p id="hp-cfg-msg" style="margin-top:8px;font-size:12px;color:var(--muted);"></p>
+        </div>
+      </div>
+
+      <div class="tab-content" id="hp-tab-positions">
+        <div class="card">
+          <div class="card-title">Open Positions <button class="btn btn-outline" style="padding:4px 10px;font-size:11px;margin-left:8px;" onclick="loadHpPositions()">↻ Refresh</button></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Market</th><th>Side</th><th>Trigger</th><th>Entry</th><th>Current</th><th>Size</th><th>PnL</th><th>SL</th><th>TP</th></tr></thead>
+              <tbody id="hp-pos-body"><tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px;">No open positions</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="hp-tab-signals">
+        <div class="card">
+          <div class="card-title">Signal History <button class="btn btn-outline" style="padding:4px 10px;font-size:11px;margin-left:8px;" onclick="loadHpLog()">↻ Refresh</button></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Action</th><th>Market</th><th>Side</th><th>Trigger $</th><th>Size</th><th>Reason</th></tr></thead>
+              <tbody id="hp-log-body"><tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px;">No signals yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="hp-tab-feed">
+        <div class="card">
+          <div class="card-title">Live Activity Feed</div>
+          <div class="log-box" id="hp-feed"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ AUDIT LOG ══ -->
+    <div class="page" id="page-audit">
+      <h2 style="margin-bottom:20px;font-size:20px;">📋 Audit Log</h2>
+      <div class="card">
+        <div class="card-title">Combined Trade History</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Bot</th><th>Action</th><th>Market</th><th>Side</th><th>Size</th><th>Price</th><th>Reason</th></tr></thead>
+            <tbody id="audit-body"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">No records yet</td></tr></tbody>
+          </table>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-outline" onclick="loadAudit()">↻ Refresh Audit Log</button>
+          <button class="btn btn-outline" onclick="exportAudit()">⬇ Export CSV</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── Socket.IO ────────────────────────────────────────────────────────────────
+const socket = io();
+
+socket.on('stats_update', data => {
+  updateOverview(data.copy, data.hp);
+  updateBotDots(data.copy, data.hp);
+});
+socket.on('copy_log', d => appendFeed('copy-feed', d.message));
+socket.on('copy_trade', d => {
+  appendFeed('copy-feed', `[${d.time}] ${d.action} | ${d.market} | ${d.side} | ${d.size} @ ${d.price}`);
+  loadCopyLog();
+});
+socket.on('hp_log', d => appendFeed('hp-feed', d.message));
+socket.on('hp_signal', d => {
+  appendFeed('hp-feed', `[${d.time}] ${d.action} | ${d.market} | ${d.side} | ${d.price}`);
+  loadHpLog();
+});
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('nav-time').textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+// ── Page nav ──────────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+}
+
+function switchTab(bot, tab) {
+  const prefix = bot + '-tab-';
+  document.querySelectorAll(`[id^="${prefix}"]`).forEach(t => t.classList.remove('active'));
+  document.getElementById(prefix + tab).classList.add('active');
+  const tabBar = document.getElementById('page-' + bot).querySelector('.tab-bar');
+  tabBar.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+// ── Overview update ─────────────────────────────────────────────────────────
+function updateOverview(c, h) {
+  if (c) {
+    document.getElementById('ov-copy-status').textContent = c.running ? '🟢 Running' : '⭕ Stopped';
+    document.getElementById('ov-c-copied').textContent = c.trades_copied||0;
+    document.getElementById('ov-c-skipped').textContent = c.trades_skipped||0;
+    document.getElementById('ov-c-sl').textContent = c.stop_losses||0;
+    const cpnl = c.total_pnl||0;
+    const cpnlEl = document.getElementById('ov-c-pnl');
+    cpnlEl.textContent = '$' + cpnl.toFixed(2);
+    cpnlEl.className = cpnl >= 0 ? 'pos' : 'neg';
+  }
+  if (h) {
+    document.getElementById('ov-hp-status').textContent = h.running ? '🟢 Running' : '⭕ Stopped';
+    document.getElementById('ov-h-scanned').textContent = h.markets_scanned||0;
+    document.getElementById('ov-h-entries').textContent = h.entries||0;
+    document.getElementById('ov-h-tp').textContent = h.take_profits||0;
+    const hpnl = h.total_pnl||0;
+    const hpnlEl = document.getElementById('ov-h-pnl');
+    hpnlEl.textContent = '$' + hpnl.toFixed(2);
+    hpnlEl.className = hpnl >= 0 ? 'pos' : 'neg';
+  }
+  // combined
+  const openPos = ((c&&c.open_positions)||0) + ((h&&h.open_positions)||0);
+  document.getElementById('ov-positions').textContent = openPos;
+  const totalPnl = ((c&&c.total_pnl)||0) + ((h&&h.total_pnl)||0);
+  const pnlEl = document.getElementById('ov-pnl');
+  pnlEl.textContent = '$' + totalPnl.toFixed(2);
+  pnlEl.className = 'stat-value ' + (totalPnl >= 0 ? 'green' : 'red');
+  const dailyLoss = ((c&&c.daily_loss)||0) + ((h&&h.daily_loss)||0);
+  document.getElementById('ov-daily-loss').textContent = '$' + dailyLoss.toFixed(2);
+}
+
+function updateBotDots(c, h) {
+  const cdot = document.getElementById('copy-dot');
+  const hdot = document.getElementById('hp-dot');
+  if (c) {
+    cdot.className = 'dot ' + (c.emergency_stop ? 'dot-emergency' : c.running ? 'dot-on' : 'dot-off');
+  }
+  if (h) {
+    hdot.className = 'dot ' + (h.emergency_stop ? 'dot-emergency' : h.running ? 'dot-on' : 'dot-off');
+  }
+}
+
+// ── Credentials ──────────────────────────────────────────────────────────────
+async function saveCredentials() {
+  const body = {
+    private_key: document.getElementById('f-pk').value,
+    api_key: document.getElementById('f-akey').value,
+    api_secret: document.getElementById('f-asec').value,
+    api_passphrase: document.getElementById('f-apass').value,
+    funder_address: document.getElementById('f-funder').value,
+  };
+  const r = await fetch('/api/connect', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  const pill = document.getElementById('conn-pill');
+  const lbl  = document.getElementById('conn-label');
+  if (d.connected) {
+    pill.classList.add('online');
+    lbl.textContent = 'Connected';
+    document.getElementById('cred-msg').textContent = '✅ Successfully connected to Polymarket.';
+  } else {
+    pill.classList.remove('online');
+    lbl.textContent = 'Read-only';
+    document.getElementById('cred-msg').textContent = '⚠️ Connected in read-only mode (no private key or py-clob-client).';
+  }
+}
+
+async function pingServer() {
+  const r = await fetch('/api/ping');
+  const d = await r.json();
+  document.getElementById('cred-msg').textContent = d.polymarket_reachable
+    ? '✅ Polymarket is reachable!' : '❌ Cannot reach Polymarket API.';
+}
+
+async function fetchBalance() {
+  const r = await fetch('/api/balance');
+  const d = await r.json();
+  document.getElementById('ov-balance').textContent = '$' + (d.balance_usdc||0).toFixed(2);
+  document.getElementById('cred-msg').textContent = `Balance: $${(d.balance_usdc||0).toFixed(2)} USDC`;
+}
+
+// ── Copy Bot controls ─────────────────────────────────────────────────────────
+async function saveCopyConfig() {
+  const body = {
+    target_address: document.getElementById('c-target').value,
+    total_capital: document.getElementById('c-capital').value,
+    capital_alloc: document.getElementById('c-alloc').value,
+    copy_ratio: document.getElementById('c-ratio').value,
+    max_trade: document.getElementById('c-maxtr').value,
+    min_trade: document.getElementById('c-mintr').value,
+    stop_loss_pct: document.getElementById('c-sl').value,
+    max_risk_pct: document.getElementById('c-risk').value,
+    daily_limit: document.getElementById('c-dlimit').value,
+    weekly_limit: document.getElementById('c-wlimit').value,
+    max_positions: document.getElementById('c-maxpos').value,
+    poll_interval: document.getElementById('c-poll').value,
+    proportional: document.getElementById('c-prop').checked,
+  };
+  await fetch('/api/copy/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  document.getElementById('copy-cfg-msg').textContent = '✅ Configuration saved!';
+  setTimeout(()=>document.getElementById('copy-cfg-msg').textContent='',3000);
+}
+async function copyStart() { await fetch('/api/copy/start',{method:'POST'}); }
+async function copyStop()  { await fetch('/api/copy/stop',{method:'POST'}); }
+async function copyEmergency() {
+  if (confirm('Trigger emergency stop for Copy Bot?')) {
+    await fetch('/api/copy/emergency',{method:'POST'});
+  }
+}
+async function loadCopyPositions() {
+  const r = await fetch('/api/copy/positions');
+  const d = await r.json();
+  const tbody = document.getElementById('copy-pos-body');
+  if (!d.length) { tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">No open positions</td></tr>'; return; }
+  tbody.innerHTML = d.map(p => `<tr>
+    <td>${p.market}</td><td>${p.side}</td>
+    <td>$${p.entry}</td><td>$${p.current}</td>
+    <td>$${p.size}</td>
+    <td class="${p.pnl>=0?'pos':'neg'}">$${p.pnl} (${p.pnl_pct}%)</td>
+    <td>$${p.stop_loss}</td><td>${p.opened_at}</td>
+  </tr>`).join('');
+}
+async function loadCopyLog() {
+  const r = await fetch('/api/copy/log');
+  const d = await r.json();
+  const tbody = document.getElementById('copy-log-body');
+  if (!d.length) { tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px;">No trades yet</td></tr>'; return; }
+  tbody.innerHTML = d.map(t => `<tr>
+    <td>${t.time}</td>
+    <td><span class="action-badge action-${t.action}">${t.action}</span></td>
+    <td>${t.market}</td><td>${t.side}</td>
+    <td>$${t.our_size}</td><td>$${t.price}</td><td>${t.reason}</td>
+  </tr>`).join('');
+}
+
+// ── HP Bot controls ────────────────────────────────────────────────────────────
+async function saveHpConfig() {
+  const body = {
+    threshold: document.getElementById('h-threshold').value,
+    pos_size: document.getElementById('h-possize').value,
+    max_pos_size: document.getElementById('h-maxpos').value,
+    scan_interval: document.getElementById('h-scan').value,
+    mean_reversion: document.getElementById('h-mode').value === 'true',
+    stop_loss_pct: document.getElementById('h-sl').value,
+    take_profit_pct: document.getElementById('h-tp').value,
+    daily_limit: document.getElementById('h-dlimit').value,
+    weekly_limit: document.getElementById('h-wlimit').value,
+    max_positions: document.getElementById('h-maxopen').value,
+    min_liquidity: document.getElementById('h-minliq').value,
+    min_volume: document.getElementById('h-minvol').value,
+  };
+  await fetch('/api/hp/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  document.getElementById('hp-cfg-msg').textContent = '✅ Configuration saved!';
+  setTimeout(()=>document.getElementById('hp-cfg-msg').textContent='',3000);
+}
+async function hpStart() { await fetch('/api/hp/start',{method:'POST'}); }
+async function hpStop()  { await fetch('/api/hp/stop',{method:'POST'}); }
+async function hpEmergency() {
+  if (confirm('Trigger emergency stop for High-Prob Bot?')) {
+    await fetch('/api/hp/emergency',{method:'POST'});
+  }
+}
+async function loadHpPositions() {
+  const r = await fetch('/api/hp/positions');
+  const d = await r.json();
+  const tbody = document.getElementById('hp-pos-body');
+  if (!d.length) { tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px;">No open positions</td></tr>'; return; }
+  tbody.innerHTML = d.map(p => `<tr>
+    <td>${p.market}</td><td>${p.side}</td>
+    <td>$${p.trigger}</td><td>$${p.entry}</td><td>$${p.current}</td>
+    <td>$${p.size}</td>
+    <td class="${p.pnl>=0?'pos':'neg'}">$${p.pnl} (${p.pnl_pct}%)</td>
+    <td>$${p.stop_loss}</td><td>$${p.take_profit}</td>
+  </tr>`).join('');
+}
+async function loadHpLog() {
+  const r = await fetch('/api/hp/log');
+  const d = await r.json();
+  const tbody = document.getElementById('hp-log-body');
+  if (!d.length) { tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px;">No signals yet</td></tr>'; return; }
+  tbody.innerHTML = d.map(s => `<tr>
+    <td>${s.time}</td>
+    <td><span class="action-badge action-${s.action}">${s.action}</span></td>
+    <td>${s.market}</td><td>${s.side}</td>
+    <td>$${s.price}</td><td>$${s.size}</td><td>${s.reason}</td>
+  </tr>`).join('');
+}
+
+// ── Audit ─────────────────────────────────────────────────────────────────────
+let auditRows = [];
+async function loadAudit() {
+  const [cr, hr] = await Promise.all([fetch('/api/copy/log'),fetch('/api/hp/log')]);
+  const cd = await cr.json();
+  const hd = await hr.json();
+  const combined = [
+    ...cd.map(r=>({...r,bot:'Copy'})),
+    ...hd.map(r=>({...r,bot:'HP'})),
+  ].sort((a,b)=>b.time.localeCompare(a.time));
+  auditRows = combined;
+  const tbody = document.getElementById('audit-body');
+  if (!combined.length) { tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">No records</td></tr>'; return; }
+  tbody.innerHTML = combined.map(r=>`<tr>
+    <td>${r.time}</td>
+    <td><span class="badge ${r.bot==='Copy'?'badge-purple':'badge-teal'}">${r.bot}</span></td>
+    <td><span class="action-badge action-${r.action}">${r.action}</span></td>
+    <td>${r.market}</td><td>${r.side}</td>
+    <td>$${r.our_size||r.size||0}</td>
+    <td>$${r.price||0}</td>
+    <td>${r.reason||''}</td>
+  </tr>`).join('');
+}
+
+function exportAudit() {
+  if (!auditRows.length) { alert('No data to export.'); return; }
+  const hdr = 'Time,Bot,Action,Market,Side,Size,Price,Reason\n';
+  const rows = auditRows.map(r => [r.time,r.bot,r.action,`"${r.market}"`,r.side,r.our_size||r.size||0,r.price||0,`"${r.reason||''}"`].join(',')).join('\n');
+  const blob = new Blob([hdr+rows],{type:'text/csv'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='polymarket_audit.csv'; a.click();
+}
+
+// ── Log feed ──────────────────────────────────────────────────────────────────
+function appendFeed(id, msg) {
+  const box = document.getElementById(id);
+  const line = document.createElement('div');
+  line.className = 'log-line ' + (msg.includes('✅')||msg.includes('ENTERED')?'ok':msg.includes('❌')||msg.includes('STOP')||msg.includes('Emergency')?'err':msg.includes('⚠️')?'warn':'info');
+  line.textContent = msg;
+  box.prepend(line);
+  while (box.children.length > 200) box.removeChild(box.lastChild);
+}
+
+// ── Proportional toggle label ─────────────────────────────────────────────────
+document.getElementById('c-prop').addEventListener('change', function() {
+  document.getElementById('c-prop-label').textContent = this.checked ? 'On' : 'Off';
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+pingServer();
+</script>
+</body>
+</html>
