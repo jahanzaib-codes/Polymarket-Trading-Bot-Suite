@@ -1418,9 +1418,63 @@
       } catch (e) { /* ignore */ }
     }
 
+    // ── Load saved bot config into form fields on page open ─────────────────────
+    async function loadSavedConfig() {
+      try {
+        // ── HP Bot config ──
+        const hr = await fetch('/api/hp/config');
+        if (hr.ok) {
+          const h = await hr.json();
+          const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
+          setVal('h-thresh-min', h.ENTRY_THRESHOLD_MIN);
+          setVal('h-thresh-max', h.ENTRY_THRESHOLD_MAX);
+          setVal('h-possize',    h.DEFAULT_POSITION_SIZE_USDC);
+          setVal('h-maxpos',     h.MAX_POSITION_SIZE_USDC);
+          setVal('h-scan',       h.SCAN_INTERVAL_SECONDS);
+          setVal('h-sl',         h.STOP_LOSS_PCT);
+          setVal('h-tp',         h.TAKE_PROFIT_PCT);
+          setVal('h-dlimit',     h.DAILY_LOSS_LIMIT_USDC);
+          setVal('h-wlimit',     h.WEEKLY_LOSS_LIMIT_USDC);
+          setVal('h-maxopen',    h.MAX_OPEN_POSITIONS);
+          setVal('h-minliq',     h.MIN_LIQUIDITY_USDC);
+          setVal('h-minvol',     h.MIN_VOLUME_USDC);
+          setVal('h-maxhours',   h.MAX_HOURS_TO_CLOSE);
+          // selects
+          const modeEl = document.getElementById('h-mode');
+          if (modeEl) modeEl.value = String(h.MEAN_REVERSION_MODE !== false);
+          const otEl = document.getElementById('h-order-type');
+          if (otEl && h.ORDER_TYPE) otEl.value = h.ORDER_TYPE;
+        }
+        // ── Copy Bot config ──
+        const cr = await fetch('/api/copy/config');
+        if (cr.ok) {
+          const c = await cr.json();
+          const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
+          setVal('c-target',  c.TARGET_TRADER_ADDRESS);
+          setVal('c-capital', c.TOTAL_CAPITAL_USDC);
+          setVal('c-alloc',   c.CAPITAL_ALLOCATION_PCT);
+          setVal('c-maxtrade',c.MAX_TRADE_SIZE_USDC);
+          setVal('c-mintrade',c.MIN_TRADE_SIZE_USDC);
+          setVal('c-maxrisk', c.MAX_RISK_PER_TRADE_PCT);
+          setVal('c-sl',      c.STOP_LOSS_PCT);
+          setVal('c-dlimit',  c.DAILY_LOSS_LIMIT_USDC);
+          setVal('c-wlimit',  c.WEEKLY_LOSS_LIMIT_USDC);
+          setVal('c-maxpos',  c.MAX_OPEN_POSITIONS);
+          setVal('c-ratio',   c.COPY_RATIO);
+          setVal('c-poll',    c.POLL_INTERVAL_SECONDS);
+          const propEl = document.getElementById('c-prop');
+          if (propEl) {
+            propEl.checked = c.PROPORTIONAL_SIZING;
+            document.getElementById('c-prop-label').textContent = c.PROPORTIONAL_SIZING ? 'On' : 'Off';
+          }
+        }
+      } catch(e) { console.warn('Could not load saved config:', e); }
+    }
+
     // ── Init ──────────────────────────────────────────────────────────────────────
     pingServer();
     loadSavedCredentials();
+    loadSavedConfig();    // Populate forms with server-side saved values
   </script>
 </body>
 

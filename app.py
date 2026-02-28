@@ -38,7 +38,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Credential persistence helpers ───────────────────────────────────────────
-CREDS_FILE = "credentials.json"
+CREDS_FILE      = "credentials.json"
+BOT_CONFIG_FILE = "bot_config.json"    # Persists Copy Bot + HP Bot settings
 
 def _load_credentials() -> dict:
     """Load saved credentials from local JSON file."""
@@ -59,6 +60,40 @@ def _save_credentials(data: dict):
     except Exception as e:
         logger.error("Could not save credentials: %s", e)
 
+def _load_bot_config():
+    """Load saved bot configuration from disk and apply to copy_config / hp_config."""
+    global copy_config, hp_config
+    try:
+        if os.path.exists(BOT_CONFIG_FILE):
+            with open(BOT_CONFIG_FILE, "r") as f:
+                saved = json.load(f)
+            # ── Copy Bot ──
+            cc = saved.get("copy", {})
+            for k, v in cc.items():
+                if hasattr(copy_config, k):
+                    setattr(copy_config, k, type(getattr(copy_config, k))(v))
+            # ── HP Bot ──
+            hc = saved.get("hp", {})
+            for k, v in hc.items():
+                if hasattr(hp_config, k):
+                    setattr(hp_config, k, type(getattr(hp_config, k))(v))
+            logger.info("Bot config loaded from %s", BOT_CONFIG_FILE)
+    except Exception as e:
+        logger.warning("Could not load bot config: %s", e)
+
+def _save_bot_config():
+    """Persist current bot config to disk so it survives restarts."""
+    try:
+        data = {
+            "copy": {k: v for k, v in copy_config.__dict__.items() if not k.startswith("_")},
+            "hp":   {k: v for k, v in hp_config.__dict__.items()   if not k.startswith("_")},
+        }
+        with open(BOT_CONFIG_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.info("Bot config saved to %s", BOT_CONFIG_FILE)
+    except Exception as e:
+        logger.error("Could not save bot config: %s", e)
+
 # ─── Flask App ────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = secrets.token_hex(32)
@@ -78,7 +113,7 @@ pm_client   = PolymarketClient()
 copy_bot: CopyTradingBot = None
 hp_bot: HighProbBot      = None
 
-# Auto-load saved credentials on startup
+# Auto-load saved credentials + bot config on startup
 _saved = _load_credentials()
 if _saved:
     pm_config.PRIVATE_KEY    = _saved.get("private_key", "")
@@ -96,6 +131,8 @@ if _saved:
         )
         pm_client.connect()
         logger.info("Auto-connected using saved credentials.")
+
+_load_bot_config()   # Restore Copy Bot + HP Bot settings from disk
 
 # ─── Password auth decorator ──────────────────────────────────────────────────
 def require_auth(f):
@@ -276,6 +313,7 @@ def api_copy_config():
         copy_config.POLL_INTERVAL_SECONDS  = float(d.get("poll_interval",  copy_config.POLL_INTERVAL_SECONDS))
         copy_config.PROPORTIONAL_SIZING    = bool(d.get("proportional",    copy_config.PROPORTIONAL_SIZING))
         _rebuild_bots()
+        _save_bot_config()   # Persist to disk
         return jsonify({"status": "ok"})
     return jsonify(copy_config.__dict__)
 
@@ -340,7 +378,6 @@ def api_hp_config():
         hp_config.ENTRY_THRESHOLD_MIN        = float(d.get("threshold_min",    hp_config.ENTRY_THRESHOLD_MIN))
         hp_config.ENTRY_THRESHOLD_MAX        = float(d.get("threshold_max",    hp_config.ENTRY_THRESHOLD_MAX))
         hp_config.ORDER_TYPE                 = str(d.get("order_type",         hp_config.ORDER_TYPE)).upper()
-        hp_config.LIMIT_OFFSET               = float(d.get("limit_offset",     hp_config.LIMIT_OFFSET))
         hp_config.DEFAULT_POSITION_SIZE_USDC = float(d.get("pos_size",        hp_config.DEFAULT_POSITION_SIZE_USDC))
         hp_config.MAX_POSITION_SIZE_USDC     = float(d.get("max_pos_size",    hp_config.MAX_POSITION_SIZE_USDC))
         hp_config.STOP_LOSS_PCT              = float(d.get("stop_loss_pct",   hp_config.STOP_LOSS_PCT))
@@ -354,6 +391,7 @@ def api_hp_config():
         hp_config.MEAN_REVERSION_MODE        = bool(d.get("mean_reversion",   hp_config.MEAN_REVERSION_MODE))
         hp_config.MAX_HOURS_TO_CLOSE         = float(d.get("max_hours",       hp_config.MAX_HOURS_TO_CLOSE))
         _rebuild_bots()
+        _save_bot_config()   # Persist to disk
         return jsonify({"status": "ok"})
     return jsonify(hp_config.__dict__)
 
