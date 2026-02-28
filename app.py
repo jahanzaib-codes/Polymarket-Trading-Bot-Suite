@@ -12,9 +12,15 @@ import logging
 import threading
 import time
 import secrets
-import hashlib
 from datetime import datetime
 from functools import wraps
+
+# Load .env file if present (VPS password config, never committed to git)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)   # does NOT override vars already set in shell
+except ImportError:
+    pass
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_socketio import SocketIO
