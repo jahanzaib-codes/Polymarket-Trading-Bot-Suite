@@ -77,6 +77,7 @@ class HighProbBotConfig:
     MIN_LIQUIDITY_USDC: float = 1000.0        # Min market liquidity required
     MIN_VOLUME_USDC: float = 500.0            # Min 24h volume required
     ACTIVE_MARKETS_ONLY: bool = True          # Only trade active (open) markets
+    MAX_HOURS_TO_CLOSE: float = 24.0          # Only scan markets closing within N hours (0 = disabled)
 
     # Mean Reversion strategy settings
     MEAN_REVERSION_MODE: bool = True          # Trade the opposing side for reversion
@@ -88,7 +89,17 @@ class HighProbBotConfig:
     EMERGENCY_STOP: bool = False
 
 
+@dataclass
+class DashboardConfig:
+    """Web dashboard security settings."""
+    CREDENTIALS_FILE: str = "credentials.json"  # Where to persist API keys locally
+    PASSWORD_ENABLED: bool = False               # Enable dashboard password protection
+    DASHBOARD_PASSWORD: str = "changeme123"      # Password for the dashboard
+    SESSION_SECRET: str = ""                      # Auto-generated on first run
+
+
 # Global default config instances
 polymarket_config = PolymarketConfig()
 copy_bot_config = CopyBotConfig()
 high_prob_config = HighProbBotConfig()
+dashboard_config = DashboardConfig()

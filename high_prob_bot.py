@@ -7,7 +7,7 @@ Capitalizes on potential mean-reversion when probabilities are extreme.
 import logging
 import time
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional, Dict, List, Callable
 from dataclasses import dataclass, field
 
@@ -197,6 +197,7 @@ class HighProbBot:
           outcomes      : ["Yes", "No"]     (strings)
           volumeNum     : float
           liquidityNum  : float
+          endDate       : "2026-02-28T12:00:00Z"  (ISO 8601)
         """
         # Safety guard – skip any non-dict item that slipped through
         if not isinstance(market, dict):
@@ -205,6 +206,21 @@ class HighProbBot:
         question  = market.get("question", "Unknown")
         volume    = float(market.get("volumeNum")    or market.get("volume24hr")   or market.get("volume")    or 0)
         liquidity = float(market.get("liquidityNum") or market.get("liquidityTotal") or market.get("liquidity") or 0)
+
+        # ── 24-hour closing filter ─────────────────────────────────────────────
+        if self.cfg.MAX_HOURS_TO_CLOSE > 0:
+            end_date_str = market.get("endDate") or market.get("closeTime") or ""
+            if end_date_str:
+                try:
+                    # Parse ISO datetime; handle both 'Z' and '+00:00' suffixes
+                    end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    now_utc = datetime.now(timezone.utc)
+                    hours_left = (end_dt - now_utc).total_seconds() / 3600
+                    # Skip if already closed (past) or too far in the future
+                    if hours_left < 0 or hours_left > self.cfg.MAX_HOURS_TO_CLOSE:
+                        return
+                except Exception:
+                    pass  # If date can't be parsed, allow the market through
 
         # Liquidity / volume filters
         if self.cfg.MIN_VOLUME_USDC > 0 and volume < self.cfg.MIN_VOLUME_USDC:
@@ -307,7 +323,9 @@ class HighProbBot:
         if self.client.connected:
             result = self.client.place_market_order(token_id, "BUY", size)
 
-        success = result is not None or not self.client.connected
+        # In paper-trade mode (no SDK / not connected) still create the position
+        in_paper_mode = not self.client.connected
+        success = result is not None or in_paper_mode
 
         if success:
             sl_price = price * (1 - self.cfg.STOP_LOSS_PCT / 100)
@@ -330,12 +348,13 @@ class HighProbBot:
             self.already_entered.add(token_id)
             self.stats["entries"] += 1
             record.action = "ENTERED"
+            mode_tag = "📄 Paper" if in_paper_mode else "✅ Live"
             self._emit(
-                f"✅ ENTERED: {question[:45]} | {outcome} @ ${price:.3f} | SL:${sl_price:.3f} TP:${tp_price:.3f}"
+                f"{mode_tag} ENTERED: {question[:45]} | {outcome} @ ${price:.3f} | SL:${sl_price:.3f} TP:${tp_price:.3f}"
             )
         else:
             record.action = "SKIPPED"
-            record.reason = "Order placement failed"
+            record.reason = "Order placement failed (check API credentials)"
             self._emit(f"❌ Failed to place order for: {question[:45]}")
 
     def _get_opposite_token(self, market: Dict, token_id: str) -> Optional[str]:
