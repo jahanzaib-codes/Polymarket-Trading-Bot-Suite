@@ -189,10 +189,22 @@ class HighProbBot:
             self._check_market(market)
 
     def _check_market(self, market: Dict):
-        """Evaluate a single market for entry signals."""
-        question = market.get("question", "Unknown")
-        volume = float(market.get("volume24hr") or market.get("volume") or 0)
-        liquidity = float(market.get("liquidity") or market.get("liquidityTotal") or 0)
+        """Evaluate a single market for entry signals.
+
+        Gamma API fields used:
+          clobTokenIds  : [yes_token_id_str, no_token_id_str]
+          outcomePrices : ["0.97", "0.03"]  (strings)
+          outcomes      : ["Yes", "No"]     (strings)
+          volumeNum     : float
+          liquidityNum  : float
+        """
+        # Safety guard – skip any non-dict item that slipped through
+        if not isinstance(market, dict):
+            return
+
+        question  = market.get("question", "Unknown")
+        volume    = float(market.get("volumeNum")    or market.get("volume24hr")   or market.get("volume")    or 0)
+        liquidity = float(market.get("liquidityNum") or market.get("liquidityTotal") or market.get("liquidity") or 0)
 
         # Liquidity / volume filters
         if self.cfg.MIN_VOLUME_USDC > 0 and volume < self.cfg.MIN_VOLUME_USDC:
@@ -200,29 +212,44 @@ class HighProbBot:
         if self.cfg.MIN_LIQUIDITY_USDC > 0 and liquidity < self.cfg.MIN_LIQUIDITY_USDC:
             return
 
-        # Get tokens (YES / NO sides)
-        tokens = market.get("tokens") or market.get("outcomes", [])
-        if not tokens:
-            # Fallback: try clobTokenIds
-            clob_ids = market.get("clobTokenIds", [])
-            tokens = [{"token_id": tid, "outcome": "YES" if i == 0 else "NO"}
-                      for i, tid in enumerate(clob_ids)]
+        # ── Build a list of (token_id, outcome_label, price) tuples ─────────
+        # Gamma API gives parallel arrays: clobTokenIds, outcomes, outcomePrices
+        clob_ids       = market.get("clobTokenIds", [])     # e.g. ["123abc", "456def"]
+        outcome_labels = market.get("outcomes", [])           # e.g. ["Yes", "No"]
+        outcome_prices = market.get("outcomePrices", [])      # e.g. ["0.97", "0.03"]
+
+        # Zip them together; skip if no token IDs available
+        tokens = []
+        for i, tid in enumerate(clob_ids):
+            if not isinstance(tid, str) or not tid:
+                continue
+            label = outcome_labels[i] if i < len(outcome_labels) else ("YES" if i == 0 else "NO")
+            # Use embedded outcomePrices first (saves a CLOB API call per token)
+            embedded_price = None
+            if i < len(outcome_prices):
+                try:
+                    embedded_price = float(outcome_prices[i])
+                except (ValueError, TypeError):
+                    pass
+            tokens.append({"token_id": tid, "outcome": label.upper(), "embedded_price": embedded_price})
 
         for token in tokens:
-            token_id = token.get("token_id") or token.get("tokenId", "")
-            outcome   = token.get("outcome", "YES")
-            if not token_id:
-                continue
-
-            # Fetch current price
-            price = self.client.get_midpoint(token_id)
-            if price is None:
-                price = self.client.get_price(token_id, "BUY")
-            if price is None:
-                continue
+            token_id       = token["token_id"]
+            outcome        = token["outcome"]
+            embedded_price = token["embedded_price"]
 
             # Already entered this token?
             if token_id in self.already_entered:
+                continue
+
+            # Use the embedded price from Gamma first; only hit CLOB if missing
+            if embedded_price is not None:
+                price = embedded_price
+            else:
+                price = self.client.get_midpoint(token_id)
+                if price is None:
+                    price = self.client.get_price(token_id, "BUY")
+            if price is None:
                 continue
 
             # Check threshold
@@ -312,15 +339,12 @@ class HighProbBot:
             self._emit(f"❌ Failed to place order for: {question[:45]}")
 
     def _get_opposite_token(self, market: Dict, token_id: str) -> Optional[str]:
-        """Find the opposing token ID (YES<->NO) within a market."""
-        tokens = market.get("tokens") or market.get("outcomes") or []
-        for t in tokens:
-            tid = t.get("token_id") or t.get("tokenId", "")
-            if tid and tid != token_id:
-                return tid
+        """Find the opposing token ID (YES<->NO) using the clobTokenIds parallel array."""
+        if not isinstance(market, dict):
+            return None
         clob_ids = market.get("clobTokenIds", [])
         for tid in clob_ids:
-            if tid != token_id:
+            if isinstance(tid, str) and tid and tid != token_id:
                 return tid
         return None
 

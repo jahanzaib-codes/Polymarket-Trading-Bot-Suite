@@ -105,7 +105,16 @@ class PolymarketClient:
     # ─── Market Data (public – no auth needed) ────────────────────────────────
 
     def get_markets(self, limit: int = 100, offset: int = 0, active_only: bool = True) -> List[Dict]:
-        """Fetch markets from the Gamma API."""
+        """Fetch markets from the Gamma API.
+
+        The Gamma API returns a flat list of market dicts with these key fields:
+          - id, question
+          - clobTokenIds  : ["<yes_token_id>", "<no_token_id>"]
+          - outcomes      : ["Yes", "No"]   (strings)
+          - outcomePrices : ["0.97", "0.03"] (strings)
+          - volumeNum, liquidityNum
+          - active, closed
+        """
         try:
             params = {"limit": limit, "offset": offset}
             if active_only:
@@ -114,7 +123,9 @@ class PolymarketClient:
             resp = self._session.get(f"{GAMMA_API}/markets", params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            return data if isinstance(data, list) else data.get("markets", data.get("data", []))
+            raw = data if isinstance(data, list) else data.get("markets", data.get("data", []))
+            # Only keep proper dict items — filter out any stray strings/nulls
+            return [m for m in raw if isinstance(m, dict)]
         except Exception as e:
             logger.error("get_markets error: %s", e)
             return []
