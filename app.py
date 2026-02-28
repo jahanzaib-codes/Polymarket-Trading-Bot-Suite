@@ -337,7 +337,10 @@ def api_hp_config():
     global hp_config
     if request.method == "POST":
         d = request.json or {}
-        hp_config.ENTRY_THRESHOLD            = float(d.get("threshold",       hp_config.ENTRY_THRESHOLD))
+        hp_config.ENTRY_THRESHOLD_MIN        = float(d.get("threshold_min",    hp_config.ENTRY_THRESHOLD_MIN))
+        hp_config.ENTRY_THRESHOLD_MAX        = float(d.get("threshold_max",    hp_config.ENTRY_THRESHOLD_MAX))
+        hp_config.ORDER_TYPE                 = str(d.get("order_type",         hp_config.ORDER_TYPE)).upper()
+        hp_config.LIMIT_OFFSET               = float(d.get("limit_offset",     hp_config.LIMIT_OFFSET))
         hp_config.DEFAULT_POSITION_SIZE_USDC = float(d.get("pos_size",        hp_config.DEFAULT_POSITION_SIZE_USDC))
         hp_config.MAX_POSITION_SIZE_USDC     = float(d.get("max_pos_size",    hp_config.MAX_POSITION_SIZE_USDC))
         hp_config.STOP_LOSS_PCT              = float(d.get("stop_loss_pct",   hp_config.STOP_LOSS_PCT))

@@ -299,8 +299,10 @@ class HighProbBot:
             if price is None:
                 continue
 
-            # Check threshold
-            if price >= self.cfg.ENTRY_THRESHOLD:
+            # Check entry range (MIN <= price <= MAX)
+            # Prices ABOVE MAX (e.g. $0.99) are too extreme — market nearly resolved
+            # Prices BELOW MIN don't meet the high-probability threshold
+            if self.cfg.ENTRY_THRESHOLD_MIN <= price <= self.cfg.ENTRY_THRESHOLD_MAX:
                 self._handle_signal(market, token_id, outcome, price, question)
 
     def _handle_signal(self, market: Dict, token_id: str, outcome: str, trigger_price: float, question: str):
@@ -309,19 +311,24 @@ class HighProbBot:
 
         # Determine trading side
         if self.cfg.MEAN_REVERSION_MODE:
-            # Enter the OPPOSITE side (bet it will mean-revert away from 90%+)
             trade_outcome = "NO" if outcome == "YES" else "YES"
-            # The opposing token price is approx 1 - trigger_price
             trade_token = self._get_opposite_token(market, token_id)
             trade_price = round(1.0 - trigger_price, 4)
         else:
-            # Enter the high-prob side directly (momentum)
             trade_outcome = outcome
             trade_token = token_id
             trade_price = trigger_price
 
+        # ── CRITICAL: mark BOTH the trigger token AND the trade token as entered
+        # immediately, so the next scan cycle doesn't re-trigger the same signal.
+        # (Bug: in mean-reversion mode we enter the NO token but was only checking YES)
+        self.already_entered.add(token_id)                     # trigger token (YES)
+        if trade_token and trade_token != token_id:
+            self.already_entered.add(trade_token)              # trade token (NO)
+
         size = min(self.cfg.DEFAULT_POSITION_SIZE_USDC, self.cfg.MAX_POSITION_SIZE_USDC)
 
+        entry_range = f"${self.cfg.ENTRY_THRESHOLD_MIN:.2f}–${self.cfg.ENTRY_THRESHOLD_MAX:.2f}"
         action = "ENTERED" if allowed else "RISK_BLOCKED"
         record = ScanRecord(
             timestamp=datetime.now(),
@@ -332,7 +339,8 @@ class HighProbBot:
             side=trade_outcome,
             size_usdc=size if allowed else 0.0,
             reason=reason if not allowed else (
-                f"{'Mean-reversion' if self.cfg.MEAN_REVERSION_MODE else 'Momentum'} entry @ ≥${self.cfg.ENTRY_THRESHOLD:.2f}"
+                f"{'Mean-reversion' if self.cfg.MEAN_REVERSION_MODE else 'Momentum'} "
+                f"entry @ {entry_range} | {self.cfg.ORDER_TYPE} order"
             ),
         )
 
@@ -349,13 +357,23 @@ class HighProbBot:
         self, market: Dict, token_id: str, outcome: str,
         price: float, size: float, question: str, record: ScanRecord,
     ):
-        """Place the actual order."""
+        """Place the actual order (market or limit depending on config)."""
         result = None
-        if self.client.connected:
-            result = self.client.place_market_order(token_id, "BUY", size)
-
-        # In paper-trade mode (no SDK / not connected) still create the position
         in_paper_mode = not self.client.connected
+
+        if self.client.connected:
+            if self.cfg.ORDER_TYPE == "LIMIT":
+                # Place a GTC limit order slightly inside the spread for better fill
+                limit_price = min(round(price + self.cfg.LIMIT_OFFSET, 4), 0.99)
+                shares = round(size / limit_price, 2) if limit_price > 0 else 0
+                result = self.client.place_limit_order(token_id, "BUY", limit_price, shares)
+                order_label = f"LIMIT @ ${limit_price:.4f}"
+            else:
+                result = self.client.place_market_order(token_id, "BUY", size)
+                order_label = "MARKET"
+        else:
+            order_label = "PAPER"
+
         success = result is not None or in_paper_mode
 
         if success:
@@ -376,12 +394,12 @@ class HighProbBot:
                 order_id=str(result.get("orderID", "")) if result else "paper",
             )
             self.open_positions[token_id] = pos
-            self.already_entered.add(token_id)
             self.stats["entries"] += 1
             record.action = "ENTERED"
             mode_tag = "📄 Paper" if in_paper_mode else "✅ Live"
             self._emit(
-                f"{mode_tag} ENTERED: {question[:45]} | {outcome} @ ${price:.3f} | SL:${sl_price:.3f} TP:${tp_price:.3f}"
+                f"{mode_tag} {order_label}: {question[:40]} | {outcome} @ ${price:.3f} "
+                f"| SL:${sl_price:.3f} TP:${tp_price:.3f}"
             )
         else:
             record.action = "SKIPPED"

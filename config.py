@@ -59,8 +59,16 @@ class CopyBotConfig:
 @dataclass
 class HighProbBotConfig:
     """Configuration for the High-Probability Entry Bot."""
-    # Price threshold (in dollars, 0.90 = 90 cents)
-    ENTRY_THRESHOLD: float = 0.90             # Enter when price >= this value
+    # Entry price RANGE (in dollars, 0.00–1.00)
+    # Bot triggers when price is between MIN and MAX (inclusive)
+    # Example: MIN=0.88 MAX=0.91 → enters at 88-91 cents only (sweet spot for reversion)
+    # Prices above MAX (e.g. $0.999) are TOO extreme and skipped
+    ENTRY_THRESHOLD_MIN: float = 0.88         # Lower bound — don't enter below this
+    ENTRY_THRESHOLD_MAX: float = 0.91         # Upper bound — don't enter above this (avoids $0.99)
+
+    # Order execution
+    ORDER_TYPE: str = "MARKET"                # "MARKET" = immediate fill, "LIMIT" = GTC limit order
+    LIMIT_OFFSET: float = 0.003              # Limit order offset above price (for better fill chance)
 
     # Position sizing
     DEFAULT_POSITION_SIZE_USDC: float = 50.0  # Default trade size in USDC
@@ -79,8 +87,8 @@ class HighProbBotConfig:
     ACTIVE_MARKETS_ONLY: bool = True          # Only trade active (open) markets
     MAX_HOURS_TO_CLOSE: float = 24.0          # Only scan markets closing within N hours (0 = disabled)
 
-    # Mean Reversion strategy settings
-    MEAN_REVERSION_MODE: bool = True          # Trade the opposing side for reversion
+    # Strategy
+    MEAN_REVERSION_MODE: bool = True          # True=bet opposite side, False=follow momentum
 
     # Monitoring interval (seconds)
     SCAN_INTERVAL_SECONDS: float = 10.0
