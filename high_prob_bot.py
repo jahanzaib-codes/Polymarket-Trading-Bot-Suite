@@ -363,11 +363,28 @@ class HighProbBot:
 
         if self.client.connected:
             if self.cfg.ORDER_TYPE == "LIMIT":
-                # Place a GTC limit order slightly inside the spread for better fill
-                limit_price = min(round(price + self.cfg.LIMIT_OFFSET, 4), 0.99)
+                # ── Fixed limit price = midpoint of the configured entry range ──
+                # e.g. range 0.88–0.91 → midpoint = 0.895
+                # YES side limit = 0.895  (we pay up to this)
+                # NO  side limit = 0.105  (we pay up to this for cheap side)
+                #
+                # WHY: if price moves to 50¢ after trigger, a midpoint limit
+                # at 0.105 for NO WILL NOT fill at 50¢.  The order waits at
+                # the exact target price zone and expires if market drifts away.
+                midpoint = round(
+                    (self.cfg.ENTRY_THRESHOLD_MIN + self.cfg.ENTRY_THRESHOLD_MAX) / 2, 4
+                )
+                if outcome in ("NO", "no"):
+                    limit_price = round(1.0 - midpoint, 4)   # cheap (NO) side
+                else:
+                    limit_price = midpoint                    # high-prob (YES) side
+                limit_price = max(0.01, min(limit_price, 0.99))
                 shares = round(size / limit_price, 2) if limit_price > 0 else 0
                 result = self.client.place_limit_order(token_id, "BUY", limit_price, shares)
-                order_label = f"LIMIT @ ${limit_price:.4f}"
+                order_label = (
+                    f"LIMIT @ ${limit_price:.4f} "
+                    f"(mid {self.cfg.ENTRY_THRESHOLD_MIN:.2f}–{self.cfg.ENTRY_THRESHOLD_MAX:.2f})"
+                )
             else:
                 result = self.client.place_market_order(token_id, "BUY", size)
                 order_label = "MARKET"

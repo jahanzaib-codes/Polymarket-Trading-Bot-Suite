@@ -67,8 +67,9 @@ class HighProbBotConfig:
     ENTRY_THRESHOLD_MAX: float = 0.91         # Upper bound — don't enter above this (avoids $0.99)
 
     # Order execution
-    ORDER_TYPE: str = "MARKET"                # "MARKET" = immediate fill, "LIMIT" = GTC limit order
-    LIMIT_OFFSET: float = 0.003              # Limit order offset above price (for better fill chance)
+    ORDER_TYPE: str = "MARKET"                # "MARKET" = instant fill, "LIMIT" = GTC at range midpoint
+    # For LIMIT orders: limit price = midpoint of (ENTRY_THRESHOLD_MIN + ENTRY_THRESHOLD_MAX) / 2
+    # e.g. range 0.88-0.91 → limit at 0.895 for YES side, 0.105 for NO side
 
     # Position sizing
     DEFAULT_POSITION_SIZE_USDC: float = 50.0  # Default trade size in USDC
