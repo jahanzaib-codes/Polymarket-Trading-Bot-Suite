@@ -7,6 +7,7 @@ Capitalizes on potential mean-reversion when probabilities are extreme.
 import logging
 import time
 import threading
+import json as _json
 from datetime import datetime, date, timezone, timedelta
 from typing import Optional, Dict, List, Callable
 from dataclasses import dataclass, field
@@ -17,6 +18,27 @@ from config import HighProbBotConfig
 logger = logging.getLogger(__name__)
 
 GAMMA_API = "https://gamma-api.polymarket.com"
+
+
+def _parse_list_field(val) -> list:
+    """
+    Gamma API sometimes returns list fields (outcomePrices, outcomes, clobTokenIds)
+    as JSON-encoded strings instead of actual Python lists.
+    e.g. val = '["0.97", "0.03"]'  (string, not list)
+    This helper always returns a proper Python list.
+    """
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        stripped = val.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = _json.loads(stripped)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+    return []
 
 
 @dataclass
@@ -210,17 +232,19 @@ class HighProbBot:
         # ── 24-hour closing filter ─────────────────────────────────────────────
         if self.cfg.MAX_HOURS_TO_CLOSE > 0:
             end_date_str = market.get("endDate") or market.get("closeTime") or ""
-            if end_date_str:
-                try:
-                    # Parse ISO datetime; handle both 'Z' and '+00:00' suffixes
-                    end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                    now_utc = datetime.now(timezone.utc)
-                    hours_left = (end_dt - now_utc).total_seconds() / 3600
-                    # Skip if already closed (past) or too far in the future
-                    if hours_left < 0 or hours_left > self.cfg.MAX_HOURS_TO_CLOSE:
-                        return
-                except Exception:
-                    pass  # If date can't be parsed, allow the market through
+            if not end_date_str:
+                # No end date → could be a permanent or long-term market, skip it
+                return
+            try:
+                end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                hours_left = (end_dt - now_utc).total_seconds() / 3600
+                # Skip if already closed (negative) or too far in the future
+                if hours_left < 0 or hours_left > self.cfg.MAX_HOURS_TO_CLOSE:
+                    return
+            except Exception:
+                # If date can't be parsed at all, be conservative and skip
+                return
 
         # Liquidity / volume filters
         if self.cfg.MIN_VOLUME_USDC > 0 and volume < self.cfg.MIN_VOLUME_USDC:
@@ -228,23 +252,30 @@ class HighProbBot:
         if self.cfg.MIN_LIQUIDITY_USDC > 0 and liquidity < self.cfg.MIN_LIQUIDITY_USDC:
             return
 
-        # ── Build a list of (token_id, outcome_label, price) tuples ─────────
-        # Gamma API gives parallel arrays: clobTokenIds, outcomes, outcomePrices
-        clob_ids       = market.get("clobTokenIds", [])     # e.g. ["123abc", "456def"]
-        outcome_labels = market.get("outcomes", [])           # e.g. ["Yes", "No"]
-        outcome_prices = market.get("outcomePrices", [])      # e.g. ["0.97", "0.03"]
+        # ── Build token list from parallel Gamma API arrays ────────────────────
+        # IMPORTANT: These fields are sometimes JSON-encoded STRINGS, not lists.
+        # e.g. outcomePrices = '["0.97", "0.03"]'  ← must json.loads() first!
+        # If we iterate chars of that string: float('9') = 9.0 → false trigger!
+        clob_ids       = _parse_list_field(market.get("clobTokenIds", []))
+        outcome_labels = _parse_list_field(market.get("outcomes", []))
+        outcome_prices = _parse_list_field(market.get("outcomePrices", []))
 
-        # Zip them together; skip if no token IDs available
+        if not clob_ids:
+            return  # Nothing to trade
+
         tokens = []
         for i, tid in enumerate(clob_ids):
             if not isinstance(tid, str) or not tid:
                 continue
             label = outcome_labels[i] if i < len(outcome_labels) else ("YES" if i == 0 else "NO")
-            # Use embedded outcomePrices first (saves a CLOB API call per token)
+            # Use embedded outcomePrices (saves a CLOB API call per token)
             embedded_price = None
             if i < len(outcome_prices):
                 try:
-                    embedded_price = float(outcome_prices[i])
+                    p = float(outcome_prices[i])
+                    # Sanity-check: Polymarket prices must be between 0.0 and 1.0
+                    if 0.0 <= p <= 1.0:
+                        embedded_price = p
                 except (ValueError, TypeError):
                     pass
             tokens.append({"token_id": tid, "outcome": label.upper(), "embedded_price": embedded_price})
