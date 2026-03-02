@@ -7,6 +7,7 @@
   <title>Polymarket Bots – Control Panel</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js" type="application/javascript"></script>
   <style>
     :root {
       --bg: #0b0e17;
@@ -747,16 +748,47 @@
       <!-- ══ CREDENTIALS ══ -->
       <div class="page" id="page-credentials">
         <h2 style="margin-bottom:20px;font-size:20px;">🔐 API Credentials</h2>
+
+        <!-- Wallet Connect Card -->
+        <div class="card" style="border-color:rgba(108,99,255,.4);">
+          <div class="card-title">🦊 Connect Wallet <span class="badge badge-purple">Polygon Network</span></div>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+            Connect your MetaMask or Trust Wallet to auto-fill your wallet address.
+            <strong style="color:#fbbf24;">Note:</strong> The bot still needs your Private Key below for automated order
+            signing on the server.
+          </p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <button class="btn" id="mm-btn" onclick="connectMetaMask()"
+              style="background:linear-gradient(135deg,#f6851b,#e2761b);color:#fff;font-weight:700;min-width:180px;">
+              <svg width="18" height="18" viewBox="0 0 512 512" style="flex-shrink:0">
+                <path fill="#fff"
+                  d="M274 35L148 155l46 27 80-93zm36 0l-2 157 80 93 46-27zm-89 172l-64 37 20 46 44-8zm106 0l-2 75 45 8 19-46zM155 285l-20 69 78-15-18-33zm204 0l-39 21-18 33 78 15zm-206 75l-4 61 59-37zm208 0l55 24-4-61zm-156 30l-47 30h90zm104 0l-43 30h90z" />
+              </svg>
+              MetaMask
+            </button>
+            <button class="btn" id="tw-btn" onclick="connectTrustWallet()"
+              style="background:linear-gradient(135deg,#3375bb,#1a5aa8);color:#fff;font-weight:700;min-width:180px;">
+              <svg width="18" height="18" viewBox="0 0 512 512" style="flex-shrink:0">
+                <path fill="#fff" d="M256 42l158 72v114c0 102-67 197-158 242C114 425 47 330 47 228V114z" />
+              </svg>
+              Trust Wallet
+            </button>
+          </div>
+          <div id="wallet-status" style="margin-top:12px;font-size:13px;color:var(--muted);"></div>
+        </div>
+
+        <!-- API Keys Card -->
         <div class="card">
-          <div class="card-title">Polymarket Wallet & API Keys</div>
+          <div class="card-title">Polymarket API Keys</div>
           <div class="form-grid">
             <div class="form-group" style="grid-column:1/-1;">
-              <label>Private Key (Polygon Wallet)</label>
-              <input type="password" id="f-pk" placeholder="0x..." />
+              <label>Private Key (Polygon Wallet) <span style="color:#ef4444;">*Required for bot signing</span></label>
+              <input type="password" id="f-pk"
+                placeholder="0x... (export from MetaMask: Account Details → Export Private Key)" />
             </div>
             <div class="form-group">
               <label>API Key</label>
-              <input type="text" id="f-akey" placeholder="From Polymarket dashboard" />
+              <input type="text" id="f-akey" placeholder="From polymarket.com → Profile → API" />
             </div>
             <div class="form-group">
               <label>API Secret</label>
@@ -767,12 +799,12 @@
               <input type="password" id="f-apass" placeholder="API Passphrase" />
             </div>
             <div class="form-group">
-              <label>Funder Address (optional – Safe wallet)</label>
-              <input type="text" id="f-funder" placeholder="0x..." />
+              <label>Funder Address (auto-filled by wallet connect)</label>
+              <input type="text" id="f-funder" placeholder="0x... (your Polygon wallet address)" />
             </div>
           </div>
           <div class="btn-row">
-            <button class="btn btn-primary" onclick="saveCredentials()">🔗 Connect</button>
+            <button class="btn btn-primary" onclick="saveCredentials()">🔗 Connect &amp; Save</button>
             <button class="btn btn-outline" onclick="pingServer()">📡 Ping Polymarket</button>
             <button class="btn btn-outline" onclick="fetchBalance()">💰 Check Balance</button>
           </div>
@@ -1428,17 +1460,17 @@
           const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
           setVal('h-thresh-min', h.ENTRY_THRESHOLD_MIN);
           setVal('h-thresh-max', h.ENTRY_THRESHOLD_MAX);
-          setVal('h-possize',    h.DEFAULT_POSITION_SIZE_USDC);
-          setVal('h-maxpos',     h.MAX_POSITION_SIZE_USDC);
-          setVal('h-scan',       h.SCAN_INTERVAL_SECONDS);
-          setVal('h-sl',         h.STOP_LOSS_PCT);
-          setVal('h-tp',         h.TAKE_PROFIT_PCT);
-          setVal('h-dlimit',     h.DAILY_LOSS_LIMIT_USDC);
-          setVal('h-wlimit',     h.WEEKLY_LOSS_LIMIT_USDC);
-          setVal('h-maxopen',    h.MAX_OPEN_POSITIONS);
-          setVal('h-minliq',     h.MIN_LIQUIDITY_USDC);
-          setVal('h-minvol',     h.MIN_VOLUME_USDC);
-          setVal('h-maxhours',   h.MAX_HOURS_TO_CLOSE);
+          setVal('h-possize', h.DEFAULT_POSITION_SIZE_USDC);
+          setVal('h-maxpos', h.MAX_POSITION_SIZE_USDC);
+          setVal('h-scan', h.SCAN_INTERVAL_SECONDS);
+          setVal('h-sl', h.STOP_LOSS_PCT);
+          setVal('h-tp', h.TAKE_PROFIT_PCT);
+          setVal('h-dlimit', h.DAILY_LOSS_LIMIT_USDC);
+          setVal('h-wlimit', h.WEEKLY_LOSS_LIMIT_USDC);
+          setVal('h-maxopen', h.MAX_OPEN_POSITIONS);
+          setVal('h-minliq', h.MIN_LIQUIDITY_USDC);
+          setVal('h-minvol', h.MIN_VOLUME_USDC);
+          setVal('h-maxhours', h.MAX_HOURS_TO_CLOSE);
           // selects
           const modeEl = document.getElementById('h-mode');
           if (modeEl) modeEl.value = String(h.MEAN_REVERSION_MODE !== false);
@@ -1450,31 +1482,93 @@
         if (cr.ok) {
           const c = await cr.json();
           const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
-          setVal('c-target',  c.TARGET_TRADER_ADDRESS);
+          setVal('c-target', c.TARGET_TRADER_ADDRESS);
           setVal('c-capital', c.TOTAL_CAPITAL_USDC);
-          setVal('c-alloc',   c.CAPITAL_ALLOCATION_PCT);
-          setVal('c-maxtrade',c.MAX_TRADE_SIZE_USDC);
-          setVal('c-mintrade',c.MIN_TRADE_SIZE_USDC);
+          setVal('c-alloc', c.CAPITAL_ALLOCATION_PCT);
+          setVal('c-maxtrade', c.MAX_TRADE_SIZE_USDC);
+          setVal('c-mintrade', c.MIN_TRADE_SIZE_USDC);
           setVal('c-maxrisk', c.MAX_RISK_PER_TRADE_PCT);
-          setVal('c-sl',      c.STOP_LOSS_PCT);
-          setVal('c-dlimit',  c.DAILY_LOSS_LIMIT_USDC);
-          setVal('c-wlimit',  c.WEEKLY_LOSS_LIMIT_USDC);
-          setVal('c-maxpos',  c.MAX_OPEN_POSITIONS);
-          setVal('c-ratio',   c.COPY_RATIO);
-          setVal('c-poll',    c.POLL_INTERVAL_SECONDS);
+          setVal('c-sl', c.STOP_LOSS_PCT);
+          setVal('c-dlimit', c.DAILY_LOSS_LIMIT_USDC);
+          setVal('c-wlimit', c.WEEKLY_LOSS_LIMIT_USDC);
+          setVal('c-maxpos', c.MAX_OPEN_POSITIONS);
+          setVal('c-ratio', c.COPY_RATIO);
+          setVal('c-poll', c.POLL_INTERVAL_SECONDS);
           const propEl = document.getElementById('c-prop');
           if (propEl) {
             propEl.checked = c.PROPORTIONAL_SIZING;
             document.getElementById('c-prop-label').textContent = c.PROPORTIONAL_SIZING ? 'On' : 'Off';
           }
         }
-      } catch(e) { console.warn('Could not load saved config:', e); }
+      } catch (e) { console.warn('Could not load saved config:', e); }
     }
+
+    // ── MetaMask / Trust Wallet connect ────────────────────────────────────────────
+    const POLYGON_CHAIN_ID = '0x89';   // 137 in hex
+
+    async function _switchToPolygon(provider) {
+      try {
+        await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: POLYGON_CHAIN_ID }] });
+      } catch (err) {
+        if (err.code === 4902) {
+          // Polygon not added yet — add it
+          await provider.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: POLYGON_CHAIN_ID, chainName: 'Polygon Mainnet',
+              nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+              rpcUrls: ['https://polygon-rpc.com/'],
+              blockExplorerUrls: ['https://polygonscan.com/']
+            }]
+          });
+        }
+      }
+    }
+
+    async function _connectWallet(walletName) {
+      const statusEl = document.getElementById('wallet-status');
+      statusEl.textContent = `Connecting to ${walletName}...`;
+      statusEl.style.color = '#fbbf24';
+      try {
+        const provider = window.ethereum;
+        if (!provider) {
+          statusEl.textContent = `❌ ${walletName} extension not found. Install it from the official site.`;
+          statusEl.style.color = '#ef4444';
+          return;
+        }
+        // Request account access
+        const accounts = await provider.request({ method: 'eth_requestAccounts' });
+        if (!accounts || accounts.length === 0) throw new Error('No accounts returned');
+
+        // Switch to Polygon network
+        await _switchToPolygon(provider);
+
+        const address = accounts[0];
+        const ethersProvider = new ethers.providers.Web3Provider(provider);
+        const balance = await ethersProvider.getBalance(address);
+        const maticBal = parseFloat(ethers.utils.formatEther(balance)).toFixed(4);
+
+        // Auto-fill funder address
+        document.getElementById('f-funder').value = address;
+
+        statusEl.innerHTML = `✅ <strong>${walletName}</strong> connected: <code style="color:#a78bfa">${address.slice(0, 6)}&hellip;${address.slice(-4)}</code> — MATIC balance: <strong>${maticBal}</strong>`;
+        statusEl.style.color = '#22c55e';
+
+        document.getElementById('cred-msg').textContent = `✅ Wallet address auto-filled. Now enter your Private Key + API credentials below and click Connect & Save.`;
+        document.getElementById('cred-msg').style.color = '#22c55e';
+      } catch (e) {
+        statusEl.textContent = `❌ ${e.message}`;
+        statusEl.style.color = '#ef4444';
+      }
+    }
+
+    async function connectMetaMask() { await _connectWallet('MetaMask'); }
+    async function connectTrustWallet() { await _connectWallet('Trust Wallet'); }
 
     // ── Init ──────────────────────────────────────────────────────────────────────
     pingServer();
     loadSavedCredentials();
-    loadSavedConfig();    // Populate forms with server-side saved values
+    loadSavedConfig();
   </script>
 </body>
 

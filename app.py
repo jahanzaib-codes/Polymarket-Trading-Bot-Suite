@@ -153,32 +153,36 @@ def _rebuild_bots():
     hp_bot   = HighProbBot(pm_client, hp_config)
 
     def _copy_status(msg):
-        socketio.emit("copy_log", {"message": msg})
+        with app.app_context():
+            socketio.emit("copy_log", {"message": msg})
 
     def _copy_trade(trade):
-        socketio.emit("copy_trade", {
-            "time":    trade.timestamp.strftime("%H:%M:%S"),
-            "action":  trade.action,
-            "market":  trade.market_question[:60],
-            "side":    trade.side,
-            "size":    f"${trade.our_size:.2f}",
-            "price":   f"${trade.price:.3f}",
-            "reason":  trade.reason,
-        })
+        with app.app_context():
+            socketio.emit("copy_trade", {
+                "time":    trade.timestamp.strftime("%H:%M:%S"),
+                "action":  trade.action,
+                "market":  trade.market_question[:60],
+                "side":    trade.side,
+                "size":    f"${trade.our_size:.2f}",
+                "price":   f"${trade.price:.3f}",
+                "reason":  trade.reason,
+            })
 
     def _hp_status(msg):
-        socketio.emit("hp_log", {"message": msg})
+        with app.app_context():
+            socketio.emit("hp_log", {"message": msg})
 
     def _hp_signal(sig):
-        socketio.emit("hp_signal", {
-            "time":    sig.timestamp.strftime("%H:%M:%S"),
-            "action":  sig.action,
-            "market":  sig.market_question[:60],
-            "side":    sig.side,
-            "price":   f"${sig.detected_price:.3f}",
-            "size":    f"${sig.size_usdc:.2f}",
-            "reason":  sig.reason,
-        })
+        with app.app_context():
+            socketio.emit("hp_signal", {
+                "time":    sig.timestamp.strftime("%H:%M:%S"),
+                "action":  sig.action,
+                "market":  sig.market_question[:60],
+                "side":    sig.side,
+                "price":   f"${sig.detected_price:.4f}",
+                "size":    f"${sig.size_usdc:.2f}",
+                "reason":  sig.reason,
+            })
 
     copy_bot.on_status_update = _copy_status
     copy_bot.on_trade         = _copy_trade
@@ -194,7 +198,8 @@ def _stats_pusher():
         try:
             copy_sum = copy_bot.get_summary() if copy_bot else {}
             hp_sum   = hp_bot.get_summary()   if hp_bot else {}
-            socketio.emit("stats_update", {"copy": copy_sum, "hp": hp_sum})
+            with app.app_context():
+                socketio.emit("stats_update", {"copy": copy_sum, "hp": hp_sum})
         except Exception:
             pass
         time.sleep(3)
