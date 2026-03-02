@@ -264,11 +264,15 @@ class HighProbBot:
         if not isinstance(market, dict):
             return
 
-        # ── Skip negRisk markets — they use special group-token mechanics ─────────
-        # NegRisk NO tokens are always at 88-99% (complement probability),
-        # causing false "high-probability" signals when the market is truly low-prob.
-        # Standard FOK limit orders don't work correctly for negRisk tokens.
-        if market.get("negRisk") or market.get("enableNegRisk"):
+        # ── Skip only TRUE negRisk GROUP markets — NOT standard binary markets ──────
+        # Polymarket sets negRisk=True on many ordinary binary markets too.
+        # Real negRisk group markets have a "negRiskGroupId" field AND their
+        # NO tokens reprice strangely (complement of multiple outcomes).
+        # Standard binary markets with negRisk=True ARE fully tradeable via CLOB.
+        # Diagnostic finding: negRisk filter was blocking 570/600 markets (95%)!
+        neg_risk_group_id = market.get("negRiskGroupId") or market.get("neg_risk_group_id") or ""
+        if neg_risk_group_id and len(str(neg_risk_group_id)) > 5:
+            # Only skip genuine negRisk GROUP markets (have a groupId > 5 chars)
             return
 
         # ── Skip markets not accepting orders ─────────────────────────────────────
