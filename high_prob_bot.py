@@ -383,6 +383,16 @@ class HighProbBot:
             trade_token = token_id
             trade_price = trigger_price
 
+        # ── Always verify trade_token via CLOB API ────────────────────────────
+        # Gamma API token IDs can be stale or in unexpected formats.
+        # The CLOB API is the authoritative source for tradeable token IDs.
+        verified = self._resolve_clob_token(market, trade_token, trade_outcome)
+        if verified:
+            trade_token = verified
+        elif not self.client._is_valid_token_id(trade_token or ""):
+            self._emit(f"  ⚠️  No valid CLOB token for: {question[:40]}")
+            return  # Cannot trade — skip silently
+
         # Only skip markets where we have an OPEN position.
         # Failed orders use a cooldown (5 min) instead of permanent skip.
         now = datetime.now()
@@ -493,14 +503,43 @@ class HighProbBot:
             self._emit(f"❌ Order FAILED for: {question[:40]} | Retry in {self.COOLDOWN_MINUTES:.0f}min | Error: {fail_reason[:60]}")
 
 
+    def _resolve_clob_token(self, market: Dict, gamma_token_id: str, outcome: str) -> Optional[str]:
+        """Authoritative token ID lookup from CLOB API.
+
+        Uses the CLOB API as the SINGLE source of truth for tradeable token IDs.
+        Falls back to the Gamma-provided token_id only if CLOB API is unavailable
+        AND the gamma token passes format validation.
+        """
+        condition_id = market.get("conditionId") or ""
+        if condition_id:
+            try:
+                clob_data = self.client.get_clob_market(condition_id)
+                if clob_data:
+                    tokens = clob_data.get("tokens", [])
+                    # Find the token that matches the desired outcome
+                    for t in tokens:
+                        if t.get("outcome", "").upper() == outcome.upper():
+                            tid = t.get("token_id", "")
+                            if self.client._is_valid_token_id(tid):
+                                return tid  # ← CLOB-verified, definitive token ID
+            except Exception as e:
+                logger.debug("CLOB token resolve error: %s", e)
+
+        # Fallback: use Gamma token if it looks valid
+        gt = gamma_token_id or ""
+        return gt if self.client._is_valid_token_id(gt) else None
+
     def _get_opposite_token(self, market: Dict, token_id: str) -> Optional[str]:
-        """Find the opposing token ID (YES<->NO) using the clobTokenIds parallel array."""
+        """Find the opposing token ID (YES↔NO) using the clobTokenIds parallel array.
+        Uses _parse_list_field to handle all Gamma API clobTokenIds formats.
+        """
         if not isinstance(market, dict):
             return None
-        clob_ids = market.get("clobTokenIds", [])
+        clob_ids = _parse_list_field(market.get("clobTokenIds", []))  # ← fixed: was using raw value
         for tid in clob_ids:
             if isinstance(tid, str) and tid and tid != token_id:
-                return tid
+                if self.client._is_valid_token_id(tid):
+                    return tid
         return None
 
     def _update_positions(self):
