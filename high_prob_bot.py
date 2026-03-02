@@ -22,15 +22,15 @@ GAMMA_API = "https://gamma-api.polymarket.com"
 
 def _parse_list_field(val) -> list:
     """
-    Gamma API sometimes returns list fields (outcomePrices, outcomes, clobTokenIds)
-    as JSON-encoded strings instead of actual Python lists.
-    e.g. val = '["0.97", "0.03"]'  (string, not list)
-    This helper always returns a proper Python list.
+    Gamma API returns list fields in multiple formats — handle ALL of them:
+      1) Already a proper list:         ["0.97", "0.03"]
+      2) JSON-encoded string:           '[\"0.97\", \"0.03\"]'
+      3) List containing JSON string:   ['[\"0.97\", \"0.03\"]']  ← THIS WAS THE BUG
+    Always returns a flat Python list of strings.
     """
-    if isinstance(val, list):
-        return val
-    if isinstance(val, str):
-        stripped = val.strip()
+    def _try_parse_json_str(s: str):
+        """Try to parse a JSON-encoded list string. Returns list or None."""
+        stripped = s.strip()
         if stripped.startswith("["):
             try:
                 parsed = _json.loads(stripped)
@@ -38,6 +38,26 @@ def _parse_list_field(val) -> list:
                     return parsed
             except Exception:
                 pass
+        return None
+
+    # Case 1: already a list — but items might themselves be JSON strings
+    if isinstance(val, list):
+        result = []
+        for item in val:
+            if isinstance(item, str):
+                nested = _try_parse_json_str(item)
+                if nested is not None:
+                    result.extend(str(x) for x in nested)   # unwrap nested JSON array
+                    continue
+            result.append(item)  # plain string or other scalar
+        return result
+
+    # Case 2: the whole field is a JSON-encoded string
+    if isinstance(val, str):
+        parsed = _try_parse_json_str(val)
+        if parsed is not None:
+            return _parse_list_field(parsed)   # recurse to handle nested
+
     return []
 
 
