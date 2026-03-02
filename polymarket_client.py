@@ -105,30 +105,59 @@ class PolymarketClient:
     # ─── Market Data (public – no auth needed) ────────────────────────────────
 
     def get_markets(self, limit: int = 100, offset: int = 0, active_only: bool = True) -> List[Dict]:
-        """Fetch markets from the Gamma API.
+        """Fetch markets from Gamma API — multiple pages + crypto tag.
 
-        The Gamma API returns a flat list of market dicts with these key fields:
-          - id, question
-          - clobTokenIds  : ["<yes_token_id>", "<no_token_id>"]
-          - outcomes      : ["Yes", "No"]   (strings)
-          - outcomePrices : ["0.97", "0.03"] (strings)
-          - volumeNum, liquidityNum
-          - active, closed
+        Fetches up to 3 pages of 200 markets (600 total) PLUS a separate
+        query for crypto-tagged markets (includes 5-min Bitcoin/ETH binary markets).
+        All results are deduplicated by market 'id'.
         """
+        seen_ids: set = set()
+        all_markets: List[Dict] = []
+
+        base_params: dict = {}
+        if active_only:
+            base_params["active"] = "true"
+            base_params["closed"] = "false"
+
+        # ── Fetch up to 3 pages of 200 markets each ────────────────────────────
+        for page in range(3):
+            try:
+                params = {**base_params, "limit": 200, "offset": page * 200}
+                resp = self._session.get(f"{GAMMA_API}/markets", params=params, timeout=15)
+                resp.raise_for_status()
+                data = resp.json()
+                raw = data if isinstance(data, list) else data.get("markets", data.get("data", []))
+                batch = [m for m in raw if isinstance(m, dict)]
+                if not batch:
+                    break   # no more results
+                for m in batch:
+                    mid = m.get("id") or m.get("conditionId") or m.get("question", "")
+                    if mid not in seen_ids:
+                        seen_ids.add(mid)
+                        all_markets.append(m)
+            except Exception as e:
+                logger.warning("get_markets page %d error: %s", page, e)
+                break
+
+        # ── Also fetch crypto-tagged markets (5M binary, BTC/ETH markets) ──────
         try:
-            params = {"limit": limit, "offset": offset}
-            if active_only:
-                params["active"] = "true"
-                params["closed"] = "false"
-            resp = self._session.get(f"{GAMMA_API}/markets", params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            raw = data if isinstance(data, list) else data.get("markets", data.get("data", []))
-            # Only keep proper dict items — filter out any stray strings/nulls
-            return [m for m in raw if isinstance(m, dict)]
+            crypto_params = {**base_params, "limit": 200, "tag": "crypto"}
+            resp = self._session.get(f"{GAMMA_API}/markets", params=crypto_params, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                raw = data if isinstance(data, list) else data.get("markets", data.get("data", []))
+                for m in raw:
+                    if isinstance(m, dict):
+                        mid = m.get("id") or m.get("conditionId") or m.get("question", "")
+                        if mid not in seen_ids:
+                            seen_ids.add(mid)
+                            all_markets.append(m)
         except Exception as e:
-            logger.error("get_markets error: %s", e)
-            return []
+            logger.warning("get_markets crypto tag error: %s", e)
+
+        logger.debug("get_markets: fetched %d unique markets total", len(all_markets))
+        return all_markets
+
 
     def get_market_by_slug(self, slug: str) -> Optional[Dict]:
         """Fetch a single market by its slug."""

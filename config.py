@@ -92,7 +92,7 @@ class HighProbBotConfig:
     MEAN_REVERSION_MODE: bool = True          # True=bet opposite side, False=follow momentum
 
     # Monitoring interval (seconds)
-    SCAN_INTERVAL_SECONDS: float = 30.0       # Scan every 30s (avoid rate limits)
+    SCAN_INTERVAL_SECONDS: float = 60.0       # Scan every 60s (fetches 3-4 API pages per scan)
 
     # Emergency stop
     EMERGENCY_STOP: bool = False
