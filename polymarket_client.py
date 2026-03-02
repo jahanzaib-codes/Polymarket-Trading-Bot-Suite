@@ -302,10 +302,18 @@ class PolymarketClient:
         if not (self.connected and self._client):
             raise RuntimeError("Not connected — save credentials and click Connect & Save first")
 
+        # Validate token_id: must be a numeric string (large decimal), NOT hex
+        if not self._is_valid_token_id(token_id):
+            raise ValueError(f"Invalid token_id format: {token_id[:30]}...")
+
         side_upper = side.upper()
-        # Aggressive limit price = willing to pay up to $0.99 for BUY (acts like market buy)
-        fok_price = 0.999 if side_upper == "BUY" else 0.001
-        shares = round(amount_usdc / fok_price, 4)
+        # Aggressive limit price for FOK (2 decimal max, Polymarket constraint)
+        # BUY at $0.99 = willing to pay up to 99 cents (market-order-like)
+        # SELL at $0.01 = willing to sell at as low as 1 cent
+        fok_price = 0.99 if side_upper == "BUY" else 0.01
+        shares = round(amount_usdc / fok_price, 2)
+        if shares < 1:
+            raise ValueError(f"Order too small: ${amount_usdc} at ${fok_price} = {shares} shares (min 1)")
 
         order_args = OrderArgs(
             token_id=token_id,
@@ -314,9 +322,36 @@ class PolymarketClient:
             side=side_upper,
         )
         signed = self._client.create_order(order_args)
-        result = self._client.post_order(signed, OrderType.FOK)  # FOK = instant fill at market price
+        result = self._client.post_order(signed, OrderType.FOK)  # FOK = fill immediately at best price
         logger.info("Market (FOK) order placed: %s", result)
         return result
+
+    def _is_valid_token_id(self, token_id: str) -> bool:
+        """Validate that token_id is a large decimal numeric string (not hex, null, or condition ID)."""
+        if not token_id or not isinstance(token_id, str):
+            return False
+        tid = token_id.strip()
+        # Valid CLOB token IDs are large decimal numbers (60+ digits)
+        # Invalid: hex strings starting with 0x, short strings, or non-numeric
+        if tid.startswith("0x") or tid.startswith("0X"):
+            return False
+        if not tid.isdigit():
+            return False
+        if len(tid) < 30:  # Polymarket token IDs are 76+ digits
+            return False
+        return True
+
+    def get_clob_market(self, condition_id: str) -> Optional[Dict]:
+        """Fetch a market directly from CLOB API to get verified token IDs for order placement.
+        Returns dict with 'tokens' list: [{token_id, outcome}, ...]
+        """
+        try:
+            resp = self._session.get(f"{CLOB_API}/markets/{condition_id}", timeout=10)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            logger.warning("CLOB market lookup error for %s: %s", condition_id, e)
+        return None
 
     def place_limit_order(
         self, token_id: str, side: str, price: float, size: float

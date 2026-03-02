@@ -279,10 +279,26 @@ class HighProbBot:
         if not clob_ids:
             return  # Nothing to trade
 
+        # Validate token IDs from Gamma — if they look wrong, fetch from CLOB directly
+        # Gamma sometimes returns hex condition IDs instead of decimal CLOB token IDs
+        valid_clob_ids = [tid for tid in clob_ids if self.client._is_valid_token_id(tid)]
+        if not valid_clob_ids and clob_ids:
+            # Fallback: look up correct token IDs from CLOB API using conditionId
+            condition_id = market.get("conditionId") or market.get("id") or ""
+            if condition_id:
+                clob_market = self.client.get_clob_market(condition_id)
+                if clob_market:
+                    fetched = clob_market.get("tokens", [])
+                    clob_ids       = [t.get("token_id", "") for t in fetched]
+                    outcome_labels = [t.get("outcome", "").upper() for t in fetched]
+                    valid_clob_ids = [tid for tid in clob_ids if self.client._is_valid_token_id(tid)]
+            if not valid_clob_ids:
+                return   # No valid token IDs — can't trade this market
+
         tokens = []
         for i, tid in enumerate(clob_ids):
-            if not isinstance(tid, str) or not tid:
-                continue
+            if not self.client._is_valid_token_id(tid):
+                continue   # skip invalid token IDs silently
             label = outcome_labels[i] if i < len(outcome_labels) else ("YES" if i == 0 else "NO")
             # Use embedded outcomePrices (saves a CLOB API call per token)
             embedded_price = None
@@ -290,7 +306,7 @@ class HighProbBot:
                 try:
                     p = float(outcome_prices[i])
                     # Sanity-check: Polymarket prices must be between 0.0 and 1.0
-                    if 0.0 <= p <= 1.0:
+                    if 0.0 < p < 1.0:
                         embedded_price = p
                 except (ValueError, TypeError):
                     pass
@@ -318,6 +334,7 @@ class HighProbBot:
             # Check entry range (MIN <= price <= MAX)
             # Prices ABOVE MAX (e.g. $0.99) are too extreme — market nearly resolved
             # Prices BELOW MIN don't meet the high-probability threshold
+
             if self.cfg.ENTRY_THRESHOLD_MIN <= price <= self.cfg.ENTRY_THRESHOLD_MAX:
                 self._handle_signal(market, token_id, outcome, price, question)
 
