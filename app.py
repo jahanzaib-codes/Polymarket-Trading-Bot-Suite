@@ -509,12 +509,10 @@ def api_hp_log():
 if __name__ == "__main__":
     print("=" * 60)
     print("  Polymarket Trading Bots Dashboard")
-    print("  Open: http://localhost:5000")
-    if dash_config.PASSWORD_ENABLED:
-        print("  🔒 Password protection: ENABLED")
+    print(f"  Open: http://0.0.0.0:5000")
+    if DASH_ENABLED:
+        print(f"  🔒 Login: username={DASH_USERNAME}  (password hidden)")
     else:
-        print("  ⚠️  Password protection: DISABLED")
-        print("  To enable: set env var DASH_PASSWORD_ENABLED=true")
-        print("             set env var DASH_PASSWORD=yourpassword")
+        print("  ⚠️  Password protection: DISABLED — set DASH_PASSWORD_ENABLED=true in .env")
     print("=" * 60)
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
