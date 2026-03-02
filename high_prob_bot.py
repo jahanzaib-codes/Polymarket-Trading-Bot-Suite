@@ -153,7 +153,10 @@ class HighProbBot:
         # State
         self.open_positions: Dict[str, HighProbPosition] = {}   # token_id -> position
         self.scan_log: List[ScanRecord] = []
-        self.already_entered: set = set()   # token_ids we've entered to avoid duplicates
+        self.already_entered: set = set()   # token_ids with OPEN positions (no re-entry)
+        self._cooldown_until: Dict[str, datetime] = {}  # token_id -> retry-after time
+        self.COOLDOWN_MINUTES: float = 5.0  # retry failed/risk-blocked after N minutes
+
         self.stats = {
             "markets_scanned": 0,
             "entries": 0,
@@ -332,12 +335,13 @@ class HighProbBot:
             trade_token = token_id
             trade_price = trigger_price
 
-        # ── CRITICAL: mark BOTH the trigger token AND the trade token as entered
-        # immediately, so the next scan cycle doesn't re-trigger the same signal.
-        # (Bug: in mean-reversion mode we enter the NO token but was only checking YES)
-        self.already_entered.add(token_id)                     # trigger token (YES)
-        if trade_token and trade_token != token_id:
-            self.already_entered.add(trade_token)              # trade token (NO)
+        # Only skip markets where we have an OPEN position.
+        # Failed orders use a cooldown (5 min) instead of permanent skip.
+        now = datetime.now()
+        if token_id in self.already_entered:
+            return   # open position exists — never double-enter
+        if token_id in self._cooldown_until and now < self._cooldown_until[token_id]:
+            return   # recently failed — wait out the cooldown
 
         size = min(self.cfg.DEFAULT_POSITION_SIZE_USDC, self.cfg.MAX_POSITION_SIZE_USDC)
 
@@ -423,6 +427,9 @@ class HighProbBot:
             self.open_positions[token_id] = pos
             self.stats["entries"] += 1
             record.action = "ENTERED"
+            # ✔ Lock this market — position is open, don't re-enter
+            self.already_entered.add(token_id)
+            self._cooldown_until.pop(token_id, None)  # clear any cooldown
             mode_tag = "📄 Paper" if in_paper_mode else "✅ Live"
             self._emit(
                 f"{mode_tag} {order_label}: {question[:40]} | {outcome} @ ${price:.3f} "
@@ -432,7 +439,11 @@ class HighProbBot:
             record.action = "FAILED"
             fail_reason = err_msg or "place_order returned None — check API key/secret/passphrase"
             record.reason = f"Order failed: {fail_reason[:120]}"
-            self._emit(f"❌ Order FAILED for: {question[:40]} | Error: {fail_reason[:80]}")
+            # ⚠️ Don't permanently lock — set 5-min cooldown then retry
+            cooldown_end = datetime.now() + timedelta(minutes=self.COOLDOWN_MINUTES)
+            self._cooldown_until[token_id] = cooldown_end
+            self._emit(f"❌ Order FAILED for: {question[:40]} | Retry in {self.COOLDOWN_MINUTES:.0f}min | Error: {fail_reason[:60]}")
+
 
     def _get_opposite_token(self, market: Dict, token_id: str) -> Optional[str]:
         """Find the opposing token ID (YES<->NO) using the clobTokenIds parallel array."""
@@ -485,6 +496,9 @@ class HighProbBot:
                     self.on_signal(record)
 
                 del self.open_positions[token_id]
+                # ✔ Unlock market — position closed, allow re-entry if price returns to range
+                self.already_entered.discard(token_id)
+                self._cooldown_until.pop(token_id, None)
                 self._emit(f"🔒 Exit: {pos.market_question[:40]} | PnL: ${pos.pnl_usdc:.2f} | {exit_reason}")
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
