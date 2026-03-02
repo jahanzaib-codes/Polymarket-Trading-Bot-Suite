@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 try:
     from py_clob_client.client import ClobClient
     from py_clob_client.clob_types import (
-        ApiCreds, OrderArgs, MarketOrderArgs,
+        ApiCreds, OrderArgs,
         OrderType, PartialCreateOrderOptions,
         TradeParams, BookParams,
     )
@@ -292,17 +292,31 @@ class PolymarketClient:
     # ─── Order Management ────────────────────────────────────────────────────
 
     def place_market_order(self, token_id: str, side: str, amount_usdc: float) -> Optional[Dict]:
-        """Place a market (taker) order. Raises on failure so caller sees real error."""
+        """Place a market order using FOK (Fill-Or-Kill) — works on ALL py-clob-client versions.
+
+        On Polymarket's CLOB, a 'market order' = a limit order with OrderType.FOK
+        at an aggressive price (0.99 for BUY, 0.01 for SELL).
+        FOK fills immediately at the best available price or cancels entirely.
+        Raises on failure so caller sees the real error message.
+        """
         if not (self.connected and self._client):
             raise RuntimeError("Not connected — save credentials and click Connect & Save first")
-        order_args = MarketOrderArgs(
+
+        side_upper = side.upper()
+        # Aggressive limit price = willing to pay up to $0.99 for BUY (acts like market buy)
+        fok_price = 0.999 if side_upper == "BUY" else 0.001
+        shares = round(amount_usdc / fok_price, 4)
+
+        order_args = OrderArgs(
             token_id=token_id,
-            side=side,
-            amount=amount_usdc,
+            price=fok_price,
+            size=shares,
+            side=side_upper,
         )
-        order = self._client.create_and_post_market_order(order_args)
-        logger.info("Market order placed: %s", order)
-        return order
+        signed = self._client.create_order(order_args)
+        result = self._client.post_order(signed, OrderType.FOK)  # FOK = instant fill at market price
+        logger.info("Market (FOK) order placed: %s", result)
+        return result
 
     def place_limit_order(
         self, token_id: str, side: str, price: float, size: float
