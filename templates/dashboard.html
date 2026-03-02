@@ -615,6 +615,92 @@
       .sidebar-section {
         display: none;
       }
+
+      /* Mobile nav bar at bottom */
+      .sidebar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        top: auto;
+        height: 60px;
+        border-right: none;
+        border-top: 1px solid var(--border);
+        padding: 0 8px;
+        z-index: 200;
+        justify-content: space-around;
+      }
+
+      .sidebar-item {
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 10px;
+        font-size: 10px;
+        min-width: 50px;
+        text-align: center;
+      }
+
+      .main {
+        padding: 12px;
+        padding-bottom: 72px;
+        /* room for bottom nav */
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr !important;
+      }
+
+      .bot-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .btn-row {
+        flex-wrap: wrap;
+      }
+
+      .btn-row .btn {
+        flex: 1;
+        min-width: 120px;
+      }
+
+      .stat-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .tbl-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      table {
+        min-width: 600px;
+      }
+
+      .nav-logo span.nav-full {
+        display: none;
+      }
+
+      .tab {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .stat-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .card {
+        padding: 14px;
+      }
     }
   </style>
 </head>
@@ -625,7 +711,7 @@
   <nav class="nav">
     <div class="nav-logo">
       <div class="dot"></div>
-      Polymarket Bot Suite
+      <span>Polymarket Bot Suite</span>
     </div>
     <div style="display:flex;gap:12px;align-items:center;">
       <span id="nav-time" style="color:var(--muted);font-size:12px;"></span>
@@ -633,6 +719,9 @@
         <div class="indicator"></div>
         <span id="conn-label">Disconnected</span>
       </div>
+      <a href="/logout"
+        style="color:var(--muted);font-size:12px;text-decoration:none;background:var(--surface2);border:1px solid var(--border);padding:4px 10px;border-radius:6px;"
+        title="Logout">🚪</a>
     </div>
   </nav>
 

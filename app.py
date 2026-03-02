@@ -94,16 +94,42 @@ def _save_bot_config():
     except Exception as e:
         logger.error("Could not save bot config: %s", e)
 
-# ─── Flask App ────────────────────────────────────────────────────────────────
+# ─── Flask App ────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config["SECRET_KEY"] = secrets.token_hex(32)
+app.config["SECRET_KEY"]        = secrets.token_hex(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
-# ─── Dashboard config ─────────────────────────────────────────────────────────
-dash_config = DashboardConfig()
-# Read password settings from environment variables (VPS-safe)
-dash_config.PASSWORD_ENABLED  = os.environ.get("DASH_PASSWORD_ENABLED", "false").lower() == "true"
-dash_config.DASHBOARD_PASSWORD = os.environ.get("DASH_PASSWORD", "changeme123")
+# ─── Dashboard auth config (from .env or defaults) ────────────────────────────
+DASH_ENABLED  = os.environ.get("DASH_PASSWORD_ENABLED", "true").lower() == "true"
+DASH_USERNAME = os.environ.get("DASH_USERNAME",  "admin")
+DASH_PASSWORD = os.environ.get("DASH_PASSWORD",  "admin123")
+
+# ─── Brute-force / DDoS rate limiter (in-memory, no extra deps) ─────────────────
+MAX_ATTEMPTS  = 5               # allow 5 wrong attempts
+LOCKOUT_SECS  = 15 * 60        # then lock for 15 minutes
+_login_attempts: dict = {}      # {ip: {"count": int, "locked_until": float}}
+
+def _check_rate_limit(ip: str) -> tuple[bool, int]:
+    """Return (allowed, seconds_remaining). Thread-safe check."""
+    now = time.time()
+    entry = _login_attempts.get(ip, {"count": 0, "locked_until": 0})
+    if now < entry["locked_until"]:
+        return False, int(entry["locked_until"] - now)
+    return True, 0
+
+def _record_fail(ip: str):
+    now = time.time()
+    entry = _login_attempts.get(ip, {"count": 0, "locked_until": 0})
+    entry["count"] = entry.get("count", 0) + 1
+    if entry["count"] >= MAX_ATTEMPTS:
+        entry["locked_until"] = now + LOCKOUT_SECS
+        entry["count"] = 0
+    _login_attempts[ip] = entry
+
+def _reset_fail(ip: str):
+    _login_attempts.pop(ip, None)
 
 # ─── Global State ─────────────────────────────────────────────────────────────
 pm_config   = PolymarketConfig()
@@ -134,16 +160,29 @@ if _saved:
 
 _load_bot_config()   # Restore Copy Bot + HP Bot settings from disk
 
-# ─── Password auth decorator ──────────────────────────────────────────────────
+# ─── Auth decorator ────────────────────────────────────────────────────
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if dash_config.PASSWORD_ENABLED and not session.get("authenticated"):
+        if DASH_ENABLED and not session.get("authenticated"):
             if request.path.startswith("/api/"):
                 return jsonify({"error": "Unauthorized"}), 401
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated
+
+# ─── Security headers on every response ────────────────────────────────────
+@app.after_request
+def _security_headers(response):
+    response.headers["X-Frame-Options"]     = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"]    = "1; mode=block"
+    response.headers["Referrer-Policy"]      = "strict-origin-when-cross-origin"
+    # Prevent browser caching of dashboard pages (forces fresh JS/HTML on reload)
+    if request.path == "/" or request.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"]         = "no-cache"
+    return response
 
 
 # ─── Bot builder ──────────────────────────────────────────────────────────────
@@ -205,14 +244,31 @@ socketio.start_background_task(_stats_pusher)
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if not DASH_ENABLED:
+        session["authenticated"] = True
+        return redirect(url_for("index"))
+
     error = ""
+    ip = request.remote_addr
+    allowed, seconds_remaining = _check_rate_limit(ip)
+
     if request.method == "POST":
-        pwd = request.form.get("password", "")
-        if pwd == dash_config.DASHBOARD_PASSWORD:
-            session["authenticated"] = True
-            return redirect(url_for("index"))
-        error = "❌ Incorrect password. Try again."
-    return render_template("login.html", error=error, enabled=dash_config.PASSWORD_ENABLED)
+        if not allowed:
+            error = f"❌ Too many failed attempts. Try again in {seconds_remaining} seconds."
+        else:
+            username = request.form.get("username", "")
+            password = request.form.get("password", "")
+            if username == DASH_USERNAME and password == DASH_PASSWORD:
+                session["authenticated"] = True
+                _reset_fail(ip)
+                return redirect(url_for("index"))
+            else:
+                _record_fail(ip)
+                error = "❌ Incorrect username or password. Try again."
+    elif not allowed:
+        error = f"❌ Too many failed attempts. Try again in {seconds_remaining} seconds."
+
+    return render_template("login.html", error=error, enabled=DASH_ENABLED)
 
 @app.route("/logout")
 def logout():
