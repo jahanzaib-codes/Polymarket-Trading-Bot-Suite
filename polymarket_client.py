@@ -297,6 +297,7 @@ class PolymarketClient:
             raise RuntimeError("Not connected — save credentials and click Connect & Save first")
         order_args = MarketOrderArgs(
             token_id=token_id,
+            side=side,
             amount=amount_usdc,
         )
         order = self._client.create_and_post_market_order(order_args)
