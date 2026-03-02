@@ -264,6 +264,17 @@ class HighProbBot:
         if not isinstance(market, dict):
             return
 
+        # ── Skip negRisk markets — they use special group-token mechanics ─────────
+        # NegRisk NO tokens are always at 88-99% (complement probability),
+        # causing false "high-probability" signals when the market is truly low-prob.
+        # Standard FOK limit orders don't work correctly for negRisk tokens.
+        if market.get("negRisk") or market.get("enableNegRisk"):
+            return
+
+        # ── Skip markets not accepting orders ─────────────────────────────────────
+        if market.get("acceptingOrders") is False:
+            return
+
         question  = market.get("question", "Unknown")
         volume    = float(market.get("volumeNum")    or market.get("volume24hr")   or market.get("volume")    or 0)
         liquidity = float(market.get("liquidityNum") or market.get("liquidityTotal") or market.get("liquidity") or 0)
