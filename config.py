@@ -83,16 +83,16 @@ class HighProbBotConfig:
     MAX_OPEN_POSITIONS: int = 5               # Max high-prob positions at once
 
     # Market Filtering
-    MIN_LIQUIDITY_USDC: float = 1000.0        # Min market liquidity required
-    MIN_VOLUME_USDC: float = 500.0            # Min 24h volume required
+    MIN_LIQUIDITY_USDC: float = 500.0         # Min market liquidity required
+    MIN_VOLUME_USDC: float = 100.0            # Min 24h volume required
     ACTIVE_MARKETS_ONLY: bool = True          # Only trade active (open) markets
-    MAX_HOURS_TO_CLOSE: float = 24.0          # Only scan markets closing within N hours (0 = disabled)
+    MAX_HOURS_TO_CLOSE: float = 0.0           # Only scan markets closing within N hours (0 = DISABLED, scan ALL markets)
 
     # Strategy
     MEAN_REVERSION_MODE: bool = True          # True=bet opposite side, False=follow momentum
 
     # Monitoring interval (seconds)
-    SCAN_INTERVAL_SECONDS: float = 10.0
+    SCAN_INTERVAL_SECONDS: float = 30.0       # Scan every 30s (avoid rate limits)
 
     # Emergency stop
     EMERGENCY_STOP: bool = False

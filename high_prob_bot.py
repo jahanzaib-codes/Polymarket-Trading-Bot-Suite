@@ -203,12 +203,28 @@ class HighProbBot:
     def _scan_markets(self):
         """Fetch all active markets and check prices against threshold."""
         markets = self.client.get_markets(limit=200, active_only=self.cfg.ACTIVE_MARKETS_ONLY)
-        self.stats["markets_scanned"] += len(markets)
+        total = len(markets)
+        self.stats["markets_scanned"] += total
+        signals_found = 0
+
+        # Emit a heartbeat so the live feed always shows activity
+        self._emit(
+            f"🔍 Scanning {total} markets │ threshold: {self.cfg.ENTRY_THRESHOLD_MIN:.2f}–{self.cfg.ENTRY_THRESHOLD_MAX:.2f} │ "
+            f"open positions: {len(self.open_positions)} │ total scanned: {self.stats['markets_scanned']}"
+        )
 
         for market in markets:
             if not self.running:
                 break
+            before = len(self.already_entered)
             self._check_market(market)
+            if len(self.already_entered) > before:
+                signals_found += 1
+
+        if signals_found == 0:
+            self._emit(f"  ℹ️  No signals in this pass (threshold not met or filter skipped markets)")
+        else:
+            self._emit(f"  ✅ {signals_found} signal(s) processed this pass")
 
     def _check_market(self, market: Dict):
         """Evaluate a single market for entry signals.
@@ -229,22 +245,19 @@ class HighProbBot:
         volume    = float(market.get("volumeNum")    or market.get("volume24hr")   or market.get("volume")    or 0)
         liquidity = float(market.get("liquidityNum") or market.get("liquidityTotal") or market.get("liquidity") or 0)
 
-        # ── 24-hour closing filter ─────────────────────────────────────────────
+        # ── 24-hour closing filter (only active when MAX_HOURS_TO_CLOSE > 0) ───────
         if self.cfg.MAX_HOURS_TO_CLOSE > 0:
             end_date_str = market.get("endDate") or market.get("closeTime") or ""
-            if not end_date_str:
-                # No end date → could be a permanent or long-term market, skip it
-                return
-            try:
-                end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                now_utc = datetime.now(timezone.utc)
-                hours_left = (end_dt - now_utc).total_seconds() / 3600
-                # Skip if already closed (negative) or too far in the future
-                if hours_left < 0 or hours_left > self.cfg.MAX_HOURS_TO_CLOSE:
-                    return
-            except Exception:
-                # If date can't be parsed at all, be conservative and skip
-                return
+            if end_date_str:
+                try:
+                    end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    now_utc = datetime.now(timezone.utc)
+                    hours_left = (end_dt - now_utc).total_seconds() / 3600
+                    if hours_left < 0 or hours_left > self.cfg.MAX_HOURS_TO_CLOSE:
+                        return   # too far / already closed
+                except Exception:
+                    pass   # can't parse date, allow through
+            # If no endDate at all, allow through (don't skip blindly)
 
         # Liquidity / volume filters
         if self.cfg.MIN_VOLUME_USDC > 0 and volume < self.cfg.MIN_VOLUME_USDC:
