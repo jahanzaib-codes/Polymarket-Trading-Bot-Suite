@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
   <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js" type="application/javascript"></script>
+  <script src="https://unpkg.com/@metamask/detect-provider/dist/detect-provider.bundle.js"></script>
   <style>
     :root {
       --bg: #0b0e17;
@@ -1503,67 +1504,83 @@
       } catch (e) { console.warn('Could not load saved config:', e); }
     }
 
-    // ── MetaMask / Trust Wallet connect ────────────────────────────────────────────
-    const POLYGON_CHAIN_ID = '0x89';   // 137 in hex
+    // ── Wallet Connect (MetaMask + Trust Wallet) ───────────────────────────────
+    // Note: Wallets like MetaMask only inject window.ethereum on sites they trust.
+    // When multiple wallet extensions conflict, detectEthereumProvider picks the right one.
+    const POLYGON_CHAIN = {
+      chainId: '0x89', chainName: 'Polygon Mainnet',
+      nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+      rpcUrls: ['https://polygon-rpc.com/'], blockExplorerUrls: ['https://polygonscan.com/']
+    };
 
-    async function _switchToPolygon(provider) {
-      try {
-        await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: POLYGON_CHAIN_ID }] });
-      } catch (err) {
-        if (err.code === 4902) {
-          // Polygon not added yet — add it
-          await provider.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: POLYGON_CHAIN_ID, chainName: 'Polygon Mainnet',
-              nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
-              rpcUrls: ['https://polygon-rpc.com/'],
-              blockExplorerUrls: ['https://polygonscan.com/']
-            }]
-          });
-        }
+    async function _getProvider(preferTrust) {
+      // Trust Wallet exposes window.trustwallet before window.ethereum
+      if (preferTrust && window.trustwallet) return window.trustwallet;
+      // Use detect-provider library if available (handles multi-wallet conflicts)
+      if (typeof detectEthereumProvider === 'function') {
+        const p = await detectEthereumProvider({ mustBeMetaMask: false, timeout: 3000 });
+        if (p) return p;
       }
+      // Direct fallback
+      if (window.ethereum) return window.ethereum;
+      return null;
     }
 
-    async function _connectWallet(walletName) {
+    async function _connectWallet(walletName, preferTrust) {
       const statusEl = document.getElementById('wallet-status');
-      statusEl.textContent = `Connecting to ${walletName}...`;
-      statusEl.style.color = '#fbbf24';
+      statusEl.innerHTML = `<span style="color:#fbbf24">⏳ Connecting to ${walletName}... (check browser popup)</span>`;
       try {
-        const provider = window.ethereum;
+        const provider = await _getProvider(preferTrust);
         if (!provider) {
-          statusEl.textContent = `❌ ${walletName} extension not found. Install it from the official site.`;
-          statusEl.style.color = '#ef4444';
+          statusEl.innerHTML = [
+            '<span style="color:#ef4444">❌ Wallet not detected.</span>',
+            '<br><small style="color:#94a3b8">Troubleshooting:<br>',
+            '• Make sure the extension is installed &amp; UNLOCKED in this browser<br>',
+            '• If multiple wallets installed, disable all except the one you want<br>',
+            '• Refresh the page and try again<br>',
+            '• Try a different browser (Chrome recommended for MetaMask)</small>'
+          ].join('');
           return;
         }
-        // Request account access
+        // Request accounts
         const accounts = await provider.request({ method: 'eth_requestAccounts' });
-        if (!accounts || accounts.length === 0) throw new Error('No accounts returned');
-
-        // Switch to Polygon network
-        await _switchToPolygon(provider);
-
+        if (!accounts || !accounts.length) throw new Error('No accounts returned — unlock your wallet first');
         const address = accounts[0];
-        const ethersProvider = new ethers.providers.Web3Provider(provider);
-        const balance = await ethersProvider.getBalance(address);
-        const maticBal = parseFloat(ethers.utils.formatEther(balance)).toFixed(4);
 
-        // Auto-fill funder address
+        // Switch to Polygon
+        try {
+          await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x89' }] });
+        } catch (e) {
+          if (e.code === 4902) {
+            await provider.request({ method: 'wallet_addEthereumChain', params: [POLYGON_CHAIN] });
+          }
+        }
+
+        // Get MATIC balance
+        let maticBal = '?';
+        try {
+          if (window.ethers) {
+            const ep = new ethers.providers.Web3Provider(provider);
+            const b = await ep.getBalance(address);
+            maticBal = parseFloat(ethers.utils.formatEther(b)).toFixed(4);
+          }
+        } catch (_) { }
+
+        // Auto-fill address
         document.getElementById('f-funder').value = address;
-
-        statusEl.innerHTML = `✅ <strong>${walletName}</strong> connected: <code style="color:#a78bfa">${address.slice(0, 6)}&hellip;${address.slice(-4)}</code> — MATIC balance: <strong>${maticBal}</strong>`;
-        statusEl.style.color = '#22c55e';
-
-        document.getElementById('cred-msg').textContent = `✅ Wallet address auto-filled. Now enter your Private Key + API credentials below and click Connect & Save.`;
-        document.getElementById('cred-msg').style.color = '#22c55e';
+        statusEl.innerHTML = [
+          `✅ <strong>${walletName}</strong> connected — `,
+          `<code style="color:#a78bfa">${address.slice(0, 6)}&hellip;${address.slice(-4)}</code>`,
+          ` — MATIC: <strong>${maticBal}</strong><br>`,
+          '<small style="color:#94a3b8">Wallet address auto-filled below. Now add your Private Key + API keys and click <strong>Connect &amp; Save</strong>.</small>'
+        ].join('');
       } catch (e) {
-        statusEl.textContent = `❌ ${e.message}`;
-        statusEl.style.color = '#ef4444';
+        statusEl.innerHTML = `<span style="color:#ef4444">❌ ${e.message || e}</span>`;
       }
     }
 
-    async function connectMetaMask() { await _connectWallet('MetaMask'); }
-    async function connectTrustWallet() { await _connectWallet('Trust Wallet'); }
+    function connectMetaMask() { _connectWallet('MetaMask', false); }
+    function connectTrustWallet() { _connectWallet('Trust Wallet', true); }
 
     // ── Init ──────────────────────────────────────────────────────────────────────
     pingServer();

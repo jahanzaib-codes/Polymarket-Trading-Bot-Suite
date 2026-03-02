@@ -226,15 +226,39 @@ class PolymarketClient:
         return self.get_trader_positions(self.funder_address)
 
     def get_my_balance(self) -> float:
-        """Fetch USDC balance from the CLOB API."""
-        if not (self.connected and self._client):
-            return 0.0
-        try:
-            bal = self._client.get_balance_allowance()
-            return float(bal.get("balance", 0))
-        except Exception as e:
-            logger.error("get_my_balance error: %s", e)
-            return 0.0
+        """Fetch USDC balance from the CLOB API (with Data API fallback)."""
+        # Try CLOB SDK first
+        if self.connected and self._client:
+            try:
+                bal = self._client.get_balance_allowance()
+                # Response can be: {"balance": "123.45"} or {"USDC": {"balance": ...}}
+                # or even a BalanceAllowanceResponse object
+                if hasattr(bal, "balance"):
+                    return float(bal.balance or 0)
+                if isinstance(bal, dict):
+                    # Try common keys
+                    for key in ("balance", "USDC", "usdc", "amount"):
+                        v = bal.get(key, None)
+                        if v is not None:
+                            if isinstance(v, dict):
+                                return float(v.get("balance", 0) or 0)
+                            return float(v or 0)
+            except Exception as e:
+                logger.warning("CLOB balance error: %s — trying Data API", e)
+
+        # Fallback: query Polygon USDC balance via Data API
+        if self.funder_address:
+            try:
+                url = f"{DATA_API}/value?user={self.funder_address}"
+                r = self._session.get(url, timeout=5)
+                if r.status_code == 200:
+                    data = r.json()
+                    # data = {"value": 123.45} or similar
+                    val = data.get("value") or data.get("portfolio_value") or data.get("balance", 0)
+                    return float(val or 0)
+            except Exception as e:
+                logger.warning("Data API balance error: %s", e)
+        return 0.0
 
     # ─── Order Management ────────────────────────────────────────────────────
 

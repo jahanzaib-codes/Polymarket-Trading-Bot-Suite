@@ -153,36 +153,32 @@ def _rebuild_bots():
     hp_bot   = HighProbBot(pm_client, hp_config)
 
     def _copy_status(msg):
-        with app.app_context():
-            socketio.emit("copy_log", {"message": msg})
+        socketio.emit("copy_log", {"message": msg})
 
     def _copy_trade(trade):
-        with app.app_context():
-            socketio.emit("copy_trade", {
-                "time":    trade.timestamp.strftime("%H:%M:%S"),
-                "action":  trade.action,
-                "market":  trade.market_question[:60],
-                "side":    trade.side,
-                "size":    f"${trade.our_size:.2f}",
-                "price":   f"${trade.price:.3f}",
-                "reason":  trade.reason,
-            })
+        socketio.emit("copy_trade", {
+            "time":    trade.timestamp.strftime("%H:%M:%S"),
+            "action":  trade.action,
+            "market":  trade.market_question[:60],
+            "side":    trade.side,
+            "size":    f"${trade.our_size:.2f}",
+            "price":   f"${trade.price:.3f}",
+            "reason":  trade.reason,
+        })
 
     def _hp_status(msg):
-        with app.app_context():
-            socketio.emit("hp_log", {"message": msg})
+        socketio.emit("hp_log", {"message": msg})
 
     def _hp_signal(sig):
-        with app.app_context():
-            socketio.emit("hp_signal", {
-                "time":    sig.timestamp.strftime("%H:%M:%S"),
-                "action":  sig.action,
-                "market":  sig.market_question[:60],
-                "side":    sig.side,
-                "price":   f"${sig.detected_price:.4f}",
-                "size":    f"${sig.size_usdc:.2f}",
-                "reason":  sig.reason,
-            })
+        socketio.emit("hp_signal", {
+            "time":    sig.timestamp.strftime("%H:%M:%S"),
+            "action":  sig.action,
+            "market":  sig.market_question[:60],
+            "side":    sig.side,
+            "price":   f"${sig.detected_price:.4f}",
+            "size":    f"${sig.size_usdc:.2f}",
+            "reason":  sig.reason,
+        })
 
     copy_bot.on_status_update = _copy_status
     copy_bot.on_trade         = _copy_trade
@@ -192,19 +188,19 @@ def _rebuild_bots():
 
 _rebuild_bots()
 
-# ─── Background stats pusher ──────────────────────────────────────────────────
+# ─── Background stats pusher (use socketio task runner, NOT raw threading) ────
 def _stats_pusher():
+    """Push live stats every 3s. Must run inside socketio.start_background_task."""
     while True:
         try:
             copy_sum = copy_bot.get_summary() if copy_bot else {}
             hp_sum   = hp_bot.get_summary()   if hp_bot else {}
-            with app.app_context():
-                socketio.emit("stats_update", {"copy": copy_sum, "hp": hp_sum})
+            socketio.emit("stats_update", {"copy": copy_sum, "hp": hp_sum})
         except Exception:
             pass
-        time.sleep(3)
+        socketio.sleep(3)   # Use socketio.sleep — not time.sleep — inside sio tasks
 
-threading.Thread(target=_stats_pusher, daemon=True).start()
+socketio.start_background_task(_stats_pusher)
 
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
