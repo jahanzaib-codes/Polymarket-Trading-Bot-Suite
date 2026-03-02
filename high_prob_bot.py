@@ -372,35 +372,32 @@ class HighProbBot:
     ):
         """Place the actual order (market or limit depending on config)."""
         result = None
+        err_msg = ""
         in_paper_mode = not self.client.connected
 
         if self.client.connected:
-            if self.cfg.ORDER_TYPE == "LIMIT":
-                # ── Fixed limit price = midpoint of the configured entry range ──
-                # e.g. range 0.88–0.91 → midpoint = 0.895
-                # YES side limit = 0.895  (we pay up to this)
-                # NO  side limit = 0.105  (we pay up to this for cheap side)
-                #
-                # WHY: if price moves to 50¢ after trigger, a midpoint limit
-                # at 0.105 for NO WILL NOT fill at 50¢.  The order waits at
-                # the exact target price zone and expires if market drifts away.
-                midpoint = round(
-                    (self.cfg.ENTRY_THRESHOLD_MIN + self.cfg.ENTRY_THRESHOLD_MAX) / 2, 4
-                )
-                if outcome in ("NO", "no"):
-                    limit_price = round(1.0 - midpoint, 4)   # cheap (NO) side
+            try:
+                if self.cfg.ORDER_TYPE == "LIMIT":
+                    midpoint = round(
+                        (self.cfg.ENTRY_THRESHOLD_MIN + self.cfg.ENTRY_THRESHOLD_MAX) / 2, 4
+                    )
+                    if outcome in ("NO", "no"):
+                        limit_price = round(1.0 - midpoint, 4)
+                    else:
+                        limit_price = midpoint
+                    limit_price = max(0.01, min(limit_price, 0.99))
+                    shares = round(size / limit_price, 2) if limit_price > 0 else 0
+                    result = self.client.place_limit_order(token_id, "BUY", limit_price, shares)
+                    order_label = (
+                        f"LIMIT @ ${limit_price:.4f} "
+                        f"(mid {self.cfg.ENTRY_THRESHOLD_MIN:.2f}–{self.cfg.ENTRY_THRESHOLD_MAX:.2f})"
+                    )
                 else:
-                    limit_price = midpoint                    # high-prob (YES) side
-                limit_price = max(0.01, min(limit_price, 0.99))
-                shares = round(size / limit_price, 2) if limit_price > 0 else 0
-                result = self.client.place_limit_order(token_id, "BUY", limit_price, shares)
-                order_label = (
-                    f"LIMIT @ ${limit_price:.4f} "
-                    f"(mid {self.cfg.ENTRY_THRESHOLD_MIN:.2f}–{self.cfg.ENTRY_THRESHOLD_MAX:.2f})"
-                )
-            else:
-                result = self.client.place_market_order(token_id, "BUY", size)
-                order_label = "MARKET"
+                    result = self.client.place_market_order(token_id, "BUY", size)
+                    order_label = "MARKET"
+            except Exception as exc:
+                err_msg = str(exc)
+                order_label = "FAILED"
         else:
             order_label = "PAPER"
 
@@ -432,9 +429,10 @@ class HighProbBot:
                 f"| SL:${sl_price:.3f} TP:${tp_price:.3f}"
             )
         else:
-            record.action = "SKIPPED"
-            record.reason = "Order placement failed (check API credentials)"
-            self._emit(f"❌ Failed to place order for: {question[:45]}")
+            record.action = "FAILED"
+            fail_reason = err_msg or "place_order returned None — check API key/secret/passphrase"
+            record.reason = f"Order failed: {fail_reason[:120]}"
+            self._emit(f"❌ Order FAILED for: {question[:40]} | Error: {fail_reason[:80]}")
 
     def _get_opposite_token(self, market: Dict, token_id: str) -> Optional[str]:
         """Find the opposing token ID (YES<->NO) using the clobTokenIds parallel array."""

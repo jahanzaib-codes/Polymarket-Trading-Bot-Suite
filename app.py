@@ -287,6 +287,30 @@ def api_ping():
     ok = ping_polymarket()
     return jsonify({"polymarket_reachable": ok})
 
+@app.route("/api/debug/connection")
+@require_auth
+def api_debug_connection():
+    """Test credentials and return diagnostic info."""
+    info = {
+        "client_connected": pm_client.connected,
+        "has_private_key": bool(pm_config.PRIVATE_KEY),
+        "has_api_key":     bool(pm_config.API_KEY),
+        "has_api_secret":  bool(pm_config.API_SECRET),
+        "has_passphrase":  bool(pm_config.API_PASSPHRASE),
+        "funder_address":  pm_config.FUNDER_ADDRESS[:10] + "…" if pm_config.FUNDER_ADDRESS else "",
+        "balance_test":    None,
+        "balance_error":   None,
+        "order_test":      None,
+    }
+    if pm_client.connected and pm_client._client:
+        try:
+            bal = pm_client._client.get_balance_allowance()
+            info["balance_test"] = str(bal)
+        except Exception as e:
+            info["balance_error"] = str(e)
+    return jsonify(info)
+
+
 @app.route("/api/credentials/load")
 @require_auth
 def api_credentials_load():
