@@ -95,8 +95,25 @@ def _save_bot_config():
         logger.error("Could not save bot config: %s", e)
 
 # ─── Flask App ────────────────────────────────────────────────────
+
+# Persistent SECRET_KEY so sessions survive restarts (users stay logged in)
+def _get_or_create_secret_key() -> str:
+    key_file = ".secret_key"
+    if os.path.exists(key_file):
+        with open(key_file) as f:
+            key = f.read().strip()
+            if len(key) >= 32:
+                return key
+    key = secrets.token_hex(32)
+    try:
+        with open(key_file, "w") as f:
+            f.write(key)
+    except Exception:
+        pass
+    return key
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config["SECRET_KEY"]        = secrets.token_hex(32)
+app.config["SECRET_KEY"]        = _get_or_create_secret_key()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -226,6 +243,82 @@ def _rebuild_bots():
 
 
 _rebuild_bots()
+
+# ─── Server-side log buffer (survive browser refresh/reconnect) ─────────────────
+from collections import deque
+_copy_log_buffer: deque  = deque(maxlen=200)   # last 200 copy bot messages
+_hp_log_buffer:   deque  = deque(maxlen=200)   # last 200 HP bot messages
+_hp_signal_buffer: deque = deque(maxlen=200)   # last 200 signals
+_copy_trade_buffer: deque = deque(maxlen=200)  # last 200 copy trades
+
+# Patch callbacks so they ALSO push to server buffer
+_orig_copy_status = copy_bot.on_status_update
+_orig_hp_status   = hp_bot.on_status_update
+_orig_hp_signal   = hp_bot.on_signal
+_orig_copy_trade  = copy_bot.on_trade
+
+def _copy_status_buf(msg):
+    _copy_log_buffer.append({"message": msg})
+    socketio.emit("copy_log", {"message": msg})
+
+def _copy_trade_buf(trade):
+    payload = {
+        "time":    trade.timestamp.strftime("%H:%M:%S"),
+        "action":  trade.action,
+        "market":  trade.market_question[:60],
+        "side":    trade.side,
+        "size":    f"${trade.our_size:.2f}",
+        "price":   f"${trade.price:.3f}",
+        "reason":  trade.reason,
+    }
+    _copy_trade_buffer.append(payload)
+    socketio.emit("copy_trade", payload)
+
+def _hp_status_buf(msg):
+    _hp_log_buffer.append({"message": msg})
+    socketio.emit("hp_log", {"message": msg})
+
+def _hp_signal_buf(sig):
+    payload = {
+        "time":    sig.timestamp.strftime("%H:%M:%S"),
+        "action":  sig.action,
+        "market":  sig.market_question[:60],
+        "side":    sig.side,
+        "price":   f"${sig.detected_price:.4f}",
+        "size":    f"${sig.size_usdc:.2f}",
+        "reason":  sig.reason,
+    }
+    _hp_signal_buffer.append(payload)
+    socketio.emit("hp_signal", payload)
+
+copy_bot.on_status_update = _copy_status_buf
+copy_bot.on_trade         = _copy_trade_buf
+hp_bot.on_status_update   = _hp_status_buf
+hp_bot.on_signal          = _hp_signal_buf
+
+# ─── On new client connect — replay history so any device sees current state ─────
+@socketio.on("connect")
+def _on_connect():
+    """When ANY browser/device connects, immediately send last 100 log entries."""
+    try:
+        # Replay last 100 HP logs (live feed)
+        for entry in list(_hp_log_buffer)[-100:]:
+            socketio.emit("hp_log", entry, to=request.sid)
+        # Replay last 50 HP signals (signal log)
+        for entry in list(_hp_signal_buffer)[-50:]:
+            socketio.emit("hp_signal", entry, to=request.sid)
+        # Replay last 50 copy bot logs
+        for entry in list(_copy_log_buffer)[-50:]:
+            socketio.emit("copy_log", entry, to=request.sid)
+        # Replay last 50 copy trades
+        for entry in list(_copy_trade_buffer)[-50:]:
+            socketio.emit("copy_trade", entry, to=request.sid)
+        # Send current stats immediately
+        copy_sum = copy_bot.get_summary() if copy_bot else {}
+        hp_sum   = hp_bot.get_summary()   if hp_bot else {}
+        socketio.emit("stats_update", {"copy": copy_sum, "hp": hp_sum}, to=request.sid)
+    except Exception as e:
+        logger.warning("on_connect replay error: %s", e)
 
 # ─── Background stats pusher (use socketio task runner, NOT raw threading) ────
 def _stats_pusher():

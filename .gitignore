@@ -20,6 +20,8 @@ env/
 secrets.json
 credentials.json
 bot_config.json
+.secret_key
+request.txt
 
 # VPS setup guide (local use only)
 vps.md
