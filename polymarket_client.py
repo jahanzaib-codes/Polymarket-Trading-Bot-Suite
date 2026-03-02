@@ -292,43 +292,33 @@ class PolymarketClient:
     # ─── Order Management ────────────────────────────────────────────────────
 
     def place_market_order(self, token_id: str, side: str, amount_usdc: float) -> Optional[Dict]:
-        """Place a market (taker) order."""
+        """Place a market (taker) order. Raises on failure so caller sees real error."""
         if not (self.connected and self._client):
-            logger.warning("Not connected – cannot place order.")
-            return None
-        try:
-            order_args = MarketOrderArgs(
-                token_id=token_id,
-                amount=amount_usdc,
-            )
-            order = self._client.create_and_post_market_order(order_args)
-            logger.info("Market order placed: %s", order)
-            return order
-        except Exception as e:
-            logger.error("place_market_order error: %s", e)
-            return None
+            raise RuntimeError("Not connected — save credentials and click Connect & Save first")
+        order_args = MarketOrderArgs(
+            token_id=token_id,
+            amount=amount_usdc,
+        )
+        order = self._client.create_and_post_market_order(order_args)
+        logger.info("Market order placed: %s", order)
+        return order
 
     def place_limit_order(
         self, token_id: str, side: str, price: float, size: float
     ) -> Optional[Dict]:
-        """Place a GTC limit (maker) order."""
+        """Place a GTC limit (maker) order. Raises on failure so caller sees real error."""
         if not (self.connected and self._client):
-            logger.warning("Not connected – cannot place order.")
-            return None
-        try:
-            order_args = OrderArgs(
-                token_id=token_id,
-                price=price,
-                size=size,
-                side=side,
-            )
-            signed = self._client.create_order(order_args)
-            resp = self._client.post_order(signed, OrderType.GTC)
-            logger.info("Limit order placed: %s", resp)
-            return resp
-        except Exception as e:
-            logger.error("place_limit_order error: %s", e)
-            return None
+            raise RuntimeError("Not connected — save credentials and click Connect & Save first")
+        order_args = OrderArgs(
+            token_id=token_id,
+            price=price,
+            size=size,
+            side=side,
+        )
+        signed = self._client.create_order(order_args)
+        resp = self._client.post_order(signed, OrderType.GTC)
+        logger.info("Limit order placed: %s", resp)
+        return resp
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order."""
