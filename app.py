@@ -204,7 +204,30 @@ def _security_headers(response):
 
 # ─── Bot builder ──────────────────────────────────────────────────────────────
 def _rebuild_bots():
+    """Stop any running bots FIRST, then create fresh instances.
+
+    CRITICAL: Must stop old bot threads before replacing the global
+    objects, otherwise zombie threads keep running forever and
+    stats['markets_scanned'] inflates to millions.
+    """
     global copy_bot, hp_bot
+
+    # ── Stop existing bots gracefully before discarding them ──────────
+    if copy_bot is not None:
+        try:
+            copy_bot.stop()
+            time.sleep(0.3)   # Give thread time to exit loop
+        except Exception as e:
+            logger.warning("Error stopping copy_bot during rebuild: %s", e)
+
+    if hp_bot is not None:
+        try:
+            hp_bot.stop()
+            time.sleep(0.3)   # Give thread time to exit loop
+        except Exception as e:
+            logger.warning("Error stopping hp_bot during rebuild: %s", e)
+
+    # ── Create fresh bot instances ────────────────────────────────────
     copy_bot = CopyTradingBot(pm_client, copy_config)
     hp_bot   = HighProbBot(pm_client, hp_config)
 
@@ -572,7 +595,12 @@ def api_hp_config():
 @app.route("/api/hp/start",     methods=["POST"])
 @require_auth
 def api_hp_start():
-    if hp_bot and not hp_bot.running:
+    if hp_bot:
+        if hp_bot.running:
+            # Already running — idempotent, just return current state
+            return jsonify({"running": True})
+        # Reset markets_scanned so counter starts fresh each run
+        hp_bot.stats["markets_scanned"] = 0
         hp_bot.start()
     return jsonify({"running": hp_bot.running if hp_bot else False})
 

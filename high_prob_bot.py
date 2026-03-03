@@ -221,10 +221,17 @@ class HighProbBot:
             except Exception as e:
                 logger.error("High-prob bot loop error: %s", e)
                 self._emit(f"Loop error: {e}")
-            time.sleep(self.cfg.SCAN_INTERVAL_SECONDS)
+            # Sleep in small increments so stop() is noticed quickly
+            for _ in range(int(self.cfg.SCAN_INTERVAL_SECONDS * 2)):
+                if not self.running:
+                    return   # Exit thread immediately when stopped
+                time.sleep(0.5)
 
     def _scan_markets(self):
         """Fetch all active markets and check prices against threshold."""
+        if not self.running:
+            return   # Zombie-guard: don't scan if we've been stopped
+
         markets = self.client.get_markets(limit=200, active_only=self.cfg.ACTIVE_MARKETS_ONLY)
         total = len(markets)
         self.stats["markets_scanned"] += total
@@ -232,8 +239,8 @@ class HighProbBot:
 
         # Emit a heartbeat so the live feed always shows activity
         self._emit(
-            f"🔍 Scanning {total} markets │ threshold: {self.cfg.ENTRY_THRESHOLD_MIN:.2f}–{self.cfg.ENTRY_THRESHOLD_MAX:.2f} │ "
-            f"open positions: {len(self.open_positions)} │ total scanned: {self.stats['markets_scanned']}"
+            f"Scanning {total} markets | threshold: {self.cfg.ENTRY_THRESHOLD_MIN:.2f}-{self.cfg.ENTRY_THRESHOLD_MAX:.2f} | "
+            f"open positions: {len(self.open_positions)} | total scanned: {self.stats['markets_scanned']}"
         )
 
         for market in markets:
