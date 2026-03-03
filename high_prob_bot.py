@@ -271,16 +271,20 @@ class HighProbBot:
         if not isinstance(market, dict):
             return
 
-        # ── Skip only TRUE negRisk GROUP markets — NOT standard binary markets ──────
-        # Polymarket sets negRisk=True on many ordinary binary markets too.
-        # Real negRisk group markets have a "negRiskGroupId" field AND their
-        # NO tokens reprice strangely (complement of multiple outcomes).
-        # Standard binary markets with negRisk=True ARE fully tradeable via CLOB.
-        # Diagnostic finding: negRisk filter was blocking 570/600 markets (95%)!
-        neg_risk_group_id = market.get("negRiskGroupId") or market.get("neg_risk_group_id") or ""
-        if neg_risk_group_id and len(str(neg_risk_group_id)) > 5:
-            # Only skip genuine negRisk GROUP markets (have a groupId > 5 chars)
-            return
+        # ── negRisk filter: skip true group markets, allow standard binaries ─────────
+        # Gamma API actual negRisk fields (confirmed by live API inspection):
+        #   negRiskMarketID   - present on true negRisk group sub-markets
+        #   negRiskRequestID  - present on negRisk group markets
+        #   negRisk           - True on BOTH group AND standard binary markets (don't use alone)
+        #
+        # Standard binary markets (Xi Jinping out? / Putin out? / etc.) have negRisk=True
+        # but NO negRiskMarketID — they are fully tradeable with standard CLOB orders.
+        # True negRisk group markets have negRiskMarketID set — skip those only.
+        #
+        # Diagnostic result: 13 valid signals exist in 0.88-0.91 when filter is correct.
+        neg_risk_market_id = market.get("negRiskMarketID") or market.get("negRiskRequestID") or ""
+        if neg_risk_market_id and len(str(neg_risk_market_id).strip()) > 5:
+            return  # True negRisk group market — skip
 
         # ── Skip markets not accepting orders ─────────────────────────────────────
         if market.get("acceptingOrders") is False:
