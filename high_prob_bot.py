@@ -237,24 +237,88 @@ class HighProbBot:
         self.stats["markets_scanned"] += total
         signals_found = 0
 
-        # Emit a heartbeat so the live feed always shows activity
-        self._emit(
-            f"Scanning {total} markets | threshold: {self.cfg.ENTRY_THRESHOLD_MIN:.2f}-{self.cfg.ENTRY_THRESHOLD_MAX:.2f} | "
-            f"open positions: {len(self.open_positions)} | total scanned: {self.stats['markets_scanned']}"
-        )
+        # ── Debug counters ────────────────────────────────────────────
+        dbg_negrisk   = 0   # skipped by negRisk group filter
+        dbg_no_orders = 0   # skipped: acceptingOrders=False
+        dbg_no_clob   = 0   # skipped: no valid clobTokenIds
+        dbg_liq       = 0   # skipped: liquidity too low
+        dbg_vol       = 0   # skipped: volume too low
+        dbg_no_price  = 0   # skipped: no embedded price
+        dbg_in_range  = 0   # tokens with price in threshold range
+        dbg_highest   = 0.0  # highest price seen across all tokens
+        dbg_candidates = 0  # markets that passed all filters
 
         for market in markets:
             if not self.running:
                 break
+
+            if not isinstance(market, dict):
+                continue
+
+            # Replicate the same filter logic as _check_market for counting
+            neg_id = market.get("negRiskMarketID") or market.get("negRiskRequestID") or ""
+            if neg_id and len(str(neg_id).strip()) > 5:
+                dbg_negrisk += 1; continue
+            if market.get("acceptingOrders") is False:
+                dbg_no_orders += 1; continue
+
+            clob_ids = _parse_list_field(market.get("clobTokenIds", []))
+            valid_ids = [t for t in clob_ids if self.client._is_valid_token_id(t)]
+            if not valid_ids:
+                dbg_no_clob += 1; continue
+
+            volume    = float(market.get("volumeNum") or market.get("volume24hr") or market.get("volume") or 0)
+            liquidity = float(market.get("liquidityNum") or market.get("liquidityTotal") or market.get("liquidity") or 0)
+            if self.cfg.MIN_VOLUME_USDC > 0 and volume < self.cfg.MIN_VOLUME_USDC:
+                dbg_vol += 1; continue
+            if self.cfg.MIN_LIQUIDITY_USDC > 0 and liquidity < self.cfg.MIN_LIQUIDITY_USDC:
+                dbg_liq += 1; continue
+
+            dbg_candidates += 1
+
+            # Check embedded prices for this market
+            prices = _parse_list_field(market.get("outcomePrices", []))
+            for i, tid in enumerate(valid_ids):
+                if i < len(prices):
+                    try:
+                        p = float(prices[i])
+                        if 0.0 < p < 1.0:
+                            if p > dbg_highest:
+                                dbg_highest = p
+                            if self.cfg.ENTRY_THRESHOLD_MIN <= p <= self.cfg.ENTRY_THRESHOLD_MAX:
+                                dbg_in_range += 1
+                    except Exception:
+                        dbg_no_price += 1
+                else:
+                    dbg_no_price += 1
+
+            # Now do the actual market check
             before = len(self.already_entered)
             self._check_market(market)
             if len(self.already_entered) > before:
                 signals_found += 1
 
+        # ── Emit heartbeat with full debug info ───────────────────────
+        self._emit(
+            f"Scanning {total} markets | "
+            f"threshold: {self.cfg.ENTRY_THRESHOLD_MIN:.2f}-{self.cfg.ENTRY_THRESHOLD_MAX:.2f} | "
+            f"open: {len(self.open_positions)} | scanned: {self.stats['markets_scanned']}"
+        )
+        self._emit(
+            f"  [FILTER] negRisk={dbg_negrisk} noOrders={dbg_no_orders} "
+            f"noClob={dbg_no_clob} lowVol={dbg_vol} lowLiq={dbg_liq} "
+            f"-> candidates={dbg_candidates}"
+        )
+        self._emit(
+            f"  [PRICES] inRange({self.cfg.ENTRY_THRESHOLD_MIN:.2f}-"
+            f"{self.cfg.ENTRY_THRESHOLD_MAX:.2f})={dbg_in_range} "
+            f"highestSeen=${dbg_highest:.3f} noPrice={dbg_no_price}"
+        )
+
         if signals_found == 0:
-            self._emit(f"  ℹ️  No signals in this pass (threshold not met or filter skipped markets)")
+            self._emit(f"  [RESULT] No signals entered this pass")
         else:
-            self._emit(f"  ✅ {signals_found} signal(s) processed this pass")
+            self._emit(f"  [RESULT] {signals_found} signal(s) entered this pass")
 
     def _check_market(self, market: Dict):
         """Evaluate a single market for entry signals.
